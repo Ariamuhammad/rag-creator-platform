@@ -198,6 +198,12 @@ export function createDatabaseFacade(targetOrm: any) {
     chatMessage: createModelAdapter(targetOrm.public.ChatMessage),
     paymentOrder: createModelAdapter(targetOrm.public.PaymentOrder),
     payoutRequest: createModelAdapter(targetOrm.public.PayoutRequest),
+    course: createModelAdapter(targetOrm.public.Course),
+    courseModule: createModelAdapter(targetOrm.public.CourseModule),
+    lesson: createModelAdapter(targetOrm.public.Lesson),
+    lessonProgress: createModelAdapter(targetOrm.public.LessonProgress),
+    studentNote: createModelAdapter(targetOrm.public.StudentNote),
+    lessonDiscussion: createModelAdapter(targetOrm.public.LessonDiscussion),
   };
 }
 
@@ -220,6 +226,12 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   public readonly chatMessage = createModelAdapter(db.orm.public.ChatMessage);
   public readonly paymentOrder = createModelAdapter(db.orm.public.PaymentOrder);
   public readonly payoutRequest = createModelAdapter(db.orm.public.PayoutRequest);
+  public readonly course = createModelAdapter(db.orm.public.Course);
+  public readonly courseModule = createModelAdapter(db.orm.public.CourseModule);
+  public readonly lesson = createModelAdapter(db.orm.public.Lesson);
+  public readonly lessonProgress = createModelAdapter(db.orm.public.LessonProgress);
+  public readonly studentNote = createModelAdapter(db.orm.public.StudentNote);
+  public readonly lessonDiscussion = createModelAdapter(db.orm.public.LessonDiscussion);
 
   private connectionPromise: Promise<any> | null = null;
 
@@ -305,29 +317,34 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     queryEmbedding: number[],
     limit = 5,
     similarityThreshold = 0.6,
+    courseId?: string,
   ): Promise<VectorSearchResult[]> {
     const vectorString = `[${queryEmbedding.join(',')}]`;
     const conn = await this.getConnection();
     const rows: VectorSearchResult[] = [];
 
+    const sql = `
+      SELECT 
+        dc.id,
+        dc."documentId",
+        dc."creatorProfileId",
+        dc.content,
+        dc."chunkIndex",
+        dc.metadata,
+        (1 - (dc.embedding <=> $1::vector)) AS similarity
+      FROM document_chunks dc
+      JOIN documents d ON d.id = dc."documentId"
+      WHERE dc."creatorProfileId" = $2
+        AND ($5::text IS NULL OR d."courseId" = $5 OR d."courseId" IS NULL)
+        AND dc.embedding IS NOT NULL
+        AND (1 - (dc.embedding <=> $1::vector)) >= $3
+      ORDER BY dc.embedding <=> $1::vector ASC
+      LIMIT $4;
+    `;
+
     for await (const row of (conn as any).driver.query({
-      sql: `
-        SELECT 
-          id,
-          "documentId",
-          "creatorProfileId",
-          content,
-          "chunkIndex",
-          metadata,
-          (1 - (embedding <=> $1::vector)) AS similarity
-        FROM document_chunks
-        WHERE "creatorProfileId" = $2
-          AND embedding IS NOT NULL
-          AND (1 - (embedding <=> $1::vector)) >= $3
-        ORDER BY embedding <=> $1::vector ASC
-        LIMIT $4;
-      `,
-      params: [vectorString, creatorProfileId, similarityThreshold, limit],
+      sql,
+      params: [vectorString, creatorProfileId, similarityThreshold, limit, courseId || null],
     })) {
       rows.push(row as VectorSearchResult);
     }
