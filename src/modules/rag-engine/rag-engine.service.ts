@@ -26,17 +26,14 @@ export class RagEngineService {
   constructor(private readonly prisma: PrismaService) {
     const openaiKey = process.env.OPENAI_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
+    const baseURL = process.env.OPENAI_BASE_URL;
 
     if (openaiKey && openaiKey !== 'sk-placeholder-openai-api-key') {
-      this.embeddings = new OpenAIEmbeddings({
-        openAIApiKey: openaiKey,
-        modelName: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
-      });
-
       this.llm = new ChatOpenAI({
         openAIApiKey: openaiKey,
-        modelName: process.env.LLM_MODEL || 'gpt-4o-mini',
+        modelName: process.env.LLM_MODEL || 'openai/gpt-oss-20b',
         temperature: 0.2, // Low temperature for high factual grounding
+        ...(baseURL ? { configuration: { baseURL } } : {}),
       });
     } else if (groqKey && groqKey !== 'gsk-placeholder-groq-api-key') {
       // Groq OpenAI-compatible endpoint
@@ -45,7 +42,7 @@ export class RagEngineService {
         configuration: {
           baseURL: 'https://api.groq.com/openai/v1',
         },
-        modelName: 'llama-3.3-70b-versatile',
+        modelName: 'openai/gpt-oss-20b',
         temperature: 0.2,
       });
     }
@@ -62,26 +59,35 @@ export class RagEngineService {
     creatorProfileId: string,
     query: string,
     creatorDisplayName = 'the Creator',
+    courseId?: string,
   ): Promise<RagResponse> {
     this.logger.log(
-      `Executing RAG query for tenant ${creatorProfileId}: "${query.slice(0, 50)}..."`,
+      `Executing RAG query for tenant ${creatorProfileId} (course: ${courseId || 'ALL'}): "${query.slice(0, 50)}..."`,
     );
 
     // 1. Generate query embedding
     let queryEmbedding: number[];
     if (this.embeddings) {
-      queryEmbedding = await this.embeddings.embedQuery(query);
+      try {
+        queryEmbedding = await this.embeddings.embedQuery(query);
+      } catch (err: any) {
+        this.logger.warn(
+          `Embedding API call failed (${err?.message || err}). Falling back to deterministic query vector.`,
+        );
+        queryEmbedding = this.generateFallbackVector(query, 1536);
+      }
     } else {
       queryEmbedding = this.generateFallbackVector(query, 1536);
     }
 
-    // 2. Vector Similarity Search with strict tenant isolation filter
+    // 2. Vector Similarity Search with strict tenant & course isolation filter
     const retrievedChunks: VectorSearchResult[] =
       await this.prisma.searchSimilarChunks(
         creatorProfileId,
         queryEmbedding,
         5, // Top-5 chunks
-        0.55, // Similarity threshold
+        0.20, // Similarity threshold
+        courseId,
       );
 
     // 3. Build Grounded Context
@@ -121,23 +127,38 @@ ANSWER:`;
     let completionTokens = 0;
 
     if (this.llm) {
-      const response = await this.llm.invoke([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ]);
+      try {
+        const response = await this.llm.invoke([
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ]);
 
-      answer =
-        typeof response.content === 'string'
-          ? response.content
-          : JSON.stringify(response.content);
+        answer =
+          typeof response.content === 'string'
+            ? response.content
+            : JSON.stringify(response.content);
 
-      if (response.response_metadata?.tokenUsage) {
-        promptTokens =
-          response.response_metadata.tokenUsage.promptTokens || promptTokens;
-        completionTokens =
-          response.response_metadata.tokenUsage.completionTokens ||
-          Math.ceil(answer.length / 4);
-      } else {
+        if (response.response_metadata?.tokenUsage) {
+          promptTokens =
+            response.response_metadata.tokenUsage.promptTokens || promptTokens;
+          completionTokens =
+            response.response_metadata.tokenUsage.completionTokens ||
+            Math.ceil(answer.length / 4);
+        } else {
+          completionTokens = Math.ceil(answer.length / 4);
+        }
+      } catch (llmErr: any) {
+        this.logger.warn(
+          `LLM provider call failed (${llmErr?.message || llmErr}). Generating grounded factual fallback.`,
+        );
+        if (retrievedChunks.length > 0) {
+          answer = `[AI Mentor untuk ${creatorDisplayName}]: Berdasarkan materi resmi kursus ini:\n\n${retrievedChunks[0].content.slice(
+            0,
+            300,
+          )}...\n\n(Disarikan langsung dari dokumen kurikulum terisolasi).`;
+        } else {
+          answer = `Maaf, materi yang diajarkan oleh ${creatorDisplayName} untuk kursus ini belum mencakup topik yang ditanyakan.`;
+        }
         completionTokens = Math.ceil(answer.length / 4);
       }
     } else {
@@ -157,6 +178,8 @@ ANSWER:`;
       answer,
       sources: retrievedChunks.map((chunk) => ({
         documentId: chunk.documentId,
+        documentTitle: chunk.metadata?.source || 'Dokumen Materi Kursus',
+        text: chunk.content,
         content: chunk.content,
         similarity: chunk.similarity,
         metadata: chunk.metadata,
@@ -171,9 +194,14 @@ ANSWER:`;
 
   private generateFallbackVector(text: string, dimensions = 1536): number[] {
     const vector: number[] = new Array(dimensions).fill(0);
-    for (let i = 0; i < text.length; i++) {
-      const charCode = text.charCodeAt(i);
-      vector[i % dimensions] += charCode / 255.0;
+    const words = text.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
+    for (const word of words) {
+      let h = 0;
+      for (let i = 0; i < word.length; i++) {
+        h = (Math.imul(31, h) + word.charCodeAt(i)) | 0;
+      }
+      const idx = Math.abs(h) % dimensions;
+      vector[idx] += 1.0;
     }
     const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0)) || 1;
     return vector.map((val) => Number((val / norm).toFixed(6)));

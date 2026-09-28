@@ -12,6 +12,9 @@ import { KnowledgeBaseModule } from './modules/knowledge-base/knowledge-base.mod
 import { RagEngineModule } from './modules/rag-engine/rag-engine.module';
 import { BillingCreditsModule } from './modules/billing-credits/billing-credits.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { CoursesModule } from './modules/courses/courses.module';
+import { NotesModule } from './modules/notes/notes.module';
+import { DiscussionsModule } from './modules/discussions/discussions.module';
 import { GuardrailsMiddleware } from './common/middlewares/guardrails.middleware';
 
 @Module({
@@ -33,6 +36,9 @@ import { GuardrailsMiddleware } from './common/middlewares/guardrails.middleware
     RagEngineModule,
     BillingCreditsModule,
     ChatModule,
+    CoursesModule,
+    NotesModule,
+    DiscussionsModule,
   ],
 })
 export class AppModule implements NestModule {

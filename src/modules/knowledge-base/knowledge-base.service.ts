@@ -74,6 +74,7 @@ export class KnowledgeBaseService {
       data: {
         knowledgeBaseId: kbId,
         creatorProfileId,
+        courseId: dto.courseId || null,
         title: dto.title || file.originalname,
         fileType,
         fileSize: file.size,
@@ -101,7 +102,7 @@ export class KnowledgeBaseService {
     });
 
     this.logger.log(
-      `Enqueued document ingestion job ${job.id} for document ${doc.id} (Creator: ${creatorProfileId})`,
+      `Enqueued document ingestion job ${job.id} for document ${doc.id} (Creator: ${creatorProfileId}, Course: ${dto.courseId || 'GLOBAL'})`,
     );
 
     return {
@@ -111,24 +112,103 @@ export class KnowledgeBaseService {
     };
   }
 
-  async getDocumentsByCreator(creatorProfileId: string) {
-    return this.prisma.document.findMany({
-      where: { creatorProfileId },
+  async getDocumentsByCreator(creatorProfileId: string, courseId?: string) {
+    const where: any = { creatorProfileId };
+    if (courseId) {
+      where.courseId = courseId;
+    }
+
+    const docs = await this.prisma.document.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
-        _count: {
-          select: { chunks: true },
+        course: {
+          select: { id: true, title: true, slug: true },
         },
+        chunks: true,
       },
     });
+
+    return docs.map((doc: any) => ({
+      ...doc,
+      chunkCount: doc.chunks ? doc.chunks.length : (doc.chunkCount ?? 0),
+    }));
+  }
+
+  async assignDocumentToCourse(
+    creatorProfileId: string,
+    documentId: string,
+    courseId: string | null,
+  ) {
+    const doc = await this.prisma.document.findUnique({
+      where: { id: documentId },
+    });
+
+    if (!doc || doc.creatorProfileId !== creatorProfileId) {
+      throw new NotFoundException('Document not found or access denied.');
+    }
+
+    if (courseId) {
+      const course = await this.prisma.course.findUnique({
+        where: { id: courseId },
+      });
+      if (!course || course.creatorProfileId !== creatorProfileId) {
+        throw new ForbiddenException('Invalid course or course access denied.');
+      }
+    }
+
+    const updated = await this.prisma.document.update({
+      where: { id: documentId },
+      data: { courseId: courseId || null },
+    });
+
+    this.logger.log(
+      `Assigned document ${documentId} to course ${courseId || 'GLOBAL'} by creator ${creatorProfileId}`,
+    );
+    return updated;
+  }
+
+  async batchAssignDocuments(
+    creatorProfileId: string,
+    courseId: string,
+    documentIds: string[],
+  ) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+    });
+    if (!course || course.creatorProfileId !== creatorProfileId) {
+      throw new ForbiddenException('Course not found or access denied.');
+    }
+
+    for (const docId of documentIds || []) {
+      const doc = await this.prisma.document.findUnique({
+        where: { id: docId },
+      });
+      if (doc && doc.creatorProfileId === creatorProfileId) {
+        await this.prisma.document.update({
+          where: { id: docId },
+          data: { courseId },
+        });
+      }
+    }
+
+    this.logger.log(
+      `Batch assigned ${documentIds.length} document(s) to course "${course.title}" (${courseId})`,
+    );
+
+    return {
+      message: `Berhasil menugaskan ${documentIds.length} dokumen RAG ke kursus "${course.title}".`,
+      courseId,
+      assignedCount: documentIds.length,
+    };
   }
 
   async getDocumentStatus(documentId: string, creatorProfileId: string) {
     const doc = await this.prisma.document.findUnique({
       where: { id: documentId },
       include: {
-        _count: {
-          select: { chunks: true },
+        course: {
+          select: { id: true, title: true, slug: true },
         },
       },
     });

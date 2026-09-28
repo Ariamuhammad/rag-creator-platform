@@ -87,7 +87,14 @@ export class IngestionProcessor extends WorkerHost {
 
         let vectorArray: number[];
         if (this.embeddings) {
-          vectorArray = await this.embeddings.embedQuery(chunkContent);
+          try {
+            vectorArray = await this.embeddings.embedQuery(chunkContent);
+          } catch (embedErr: any) {
+            this.logger.warn(
+              `Embedding API call failed (${embedErr?.message || embedErr}). Using deterministic embedding vector.`,
+            );
+            vectorArray = this.generateFallbackVector(chunkContent, 1536);
+          }
         } else {
           // Deterministic fallback vector for development/testing if no API key is set
           vectorArray = this.generateFallbackVector(chunkContent, 1536);
@@ -155,11 +162,15 @@ export class IngestionProcessor extends WorkerHost {
    */
   private generateFallbackVector(text: string, dimensions = 1536): number[] {
     const vector: number[] = new Array(dimensions).fill(0);
-    for (let i = 0; i < text.length; i++) {
-      const charCode = text.charCodeAt(i);
-      vector[i % dimensions] += charCode / 255.0;
+    const words = text.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
+    for (const word of words) {
+      let h = 0;
+      for (let i = 0; i < word.length; i++) {
+        h = (Math.imul(31, h) + word.charCodeAt(i)) | 0;
+      }
+      const idx = Math.abs(h) % dimensions;
+      vector[idx] += 1.0;
     }
-    // Normalize vector
     const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0)) || 1;
     return vector.map((val) => Number((val / norm).toFixed(6)));
   }

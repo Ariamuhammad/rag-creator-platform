@@ -72,11 +72,12 @@ export class ChatService {
       },
     });
 
-    // 5. Execute Multi-Tenant RAG retrieval and generation
+    // 5. Execute Multi-Tenant RAG retrieval and generation (with optional course-scoped isolation)
     const ragResult = await this.ragEngine.executeRagQuery(
       creatorProfileId,
       message,
       creator.displayName,
+      dto.courseId,
     );
 
     // 6. Save Assistant response in database with token metrics and source contexts

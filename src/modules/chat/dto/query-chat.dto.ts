@@ -24,4 +24,12 @@ export class QueryChatDto {
   @IsUUID()
   @IsOptional()
   sessionId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Target Course ID to enforce course-scoped RAG isolation',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @IsString()
+  @IsOptional()
+  courseId?: string;
 }
