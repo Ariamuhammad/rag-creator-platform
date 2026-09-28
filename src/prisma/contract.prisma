@@ -1,0 +1,287 @@
+// use prisma-8
+
+enum UserRole {
+  ADMIN
+  CREATOR
+  STUDENT
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum CreditEventType {
+  CHAT_QUERY
+  SUBSCRIPTION_GRANT
+  BONUS
+  REFUND
+}
+
+enum MessageSender {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  REJECTED
+}
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  password     String
+  fullName     String?
+  role         UserRole        @default(STUDENT)
+  createdAt    DateTime        @default(now())
+  updatedAt    temporal.updatedAt()
+
+  creatorProfile CreatorProfile?
+  subscriptions  Subscription[]
+  creditLedgers  CreditLedger[]
+  chatSessions   ChatSession[]
+  paymentOrders  PaymentOrder[]
+
+  @@map("users")
+}
+
+model CreatorProfile {
+  id                    String             @id @default(uuid())
+  userId                String             @unique
+  slug                  String             @unique
+  displayName           String
+  bio                   String?
+  commissionRate        Float              @default(0.20)
+  walletBalance         Float              @default(0)
+  bankName              String?
+  bankAccountNumber     String?
+  bankAccountHolderName String?
+  createdAt             DateTime           @default(now())
+  updatedAt             temporal.updatedAt()
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionTiers SubscriptionTier[]
+  subscriptions     Subscription[]
+  paymentOrders     PaymentOrder[]
+  payoutRequests    PayoutRequest[]
+  knowledgeBases    KnowledgeBase[]
+  documents         Document[]
+  documentChunks    DocumentChunk[]
+  creditLedgers     CreditLedger[]
+  chatSessions      ChatSession[]
+
+  @@map("creator_profiles")
+}
+
+model SubscriptionTier {
+  id                 String         @id @default(uuid())
+  creatorProfileId   String
+  name               String
+  description        String?
+  price              Decimal
+  monthlyCreditQuota Int            @default(200000)
+  isActive           Boolean        @default(true)
+  createdAt          DateTime       @default(now())
+  updatedAt          temporal.updatedAt()
+
+  creatorProfile CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  subscriptions  Subscription[]
+  paymentOrders  PaymentOrder[]
+
+  @@map("subscription_tiers")
+}
+
+model Subscription {
+  id                 String             @id @default(uuid())
+  studentId          String
+  creatorProfileId   String
+  tierId             String
+  status             SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime
+  remainingCredits   Int                @default(200000)
+  createdAt          DateTime           @default(now())
+  updatedAt          temporal.updatedAt()
+
+  student        User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  creatorProfile CreatorProfile   @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  tier           SubscriptionTier @relation(fields: [tierId], references: [id], onDelete: Restrict)
+
+  @@index([studentId, creatorProfileId, status])
+  @@map("subscriptions")
+}
+
+model KnowledgeBase {
+  id               String         @id @default(uuid())
+  creatorProfileId String
+  name             String
+  description      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        temporal.updatedAt()
+
+  creatorProfile CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  documents      Document[]
+
+  @@map("knowledge_bases")
+}
+
+model Document {
+  id               String         @id @default(uuid())
+  knowledgeBaseId  String
+  creatorProfileId String
+  title            String
+  fileType         String
+  fileUrl          String?
+  fileSize         Int            @default(0)
+  status           DocumentStatus @default(PENDING)
+  errorMessage     String?
+  createdAt        DateTime       @default(now())
+  updatedAt        temporal.updatedAt()
+
+  knowledgeBase  KnowledgeBase  @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  creatorProfile CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  chunks         DocumentChunk[]
+
+  @@index([creatorProfileId, status])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id               String                      @id @default(uuid())
+  documentId       String
+  creatorProfileId String
+  content          String
+  chunkIndex       Int
+  tokenCount       Int
+  metadata         Json?
+  createdAt        DateTime                    @default(now())
+
+  document       Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  creatorProfile CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+
+  @@index([creatorProfileId])
+  @@index([documentId])
+  @@map("document_chunks")
+}
+
+model CreditLedger {
+  id               String          @id @default(uuid())
+  studentId        String
+  creatorProfileId String
+  chatSessionId    String?
+  promptTokens     Int             @default(0)
+  completionTokens Int             @default(0)
+  totalTokens      Int             @default(0)
+  creditsDeducted  Int             @default(0)
+  eventType        CreditEventType @default(CHAT_QUERY)
+  notes            String?
+  createdAt        DateTime        @default(now())
+
+  student        User            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  creatorProfile CreatorProfile  @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  chatSession    ChatSession?    @relation(fields: [chatSessionId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, creatorProfileId])
+  @@map("credit_ledgers")
+}
+
+model ChatSession {
+  id               String        @id @default(uuid())
+  studentId        String
+  creatorProfileId String
+  title            String        @default("New Conversation")
+  createdAt        DateTime      @default(now())
+  updatedAt        temporal.updatedAt()
+
+  student        User           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  creatorProfile CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  messages       ChatMessage[]
+  creditLedgers  CreditLedger[]
+
+  @@index([studentId, creatorProfileId])
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id               String        @id @default(uuid())
+  chatSessionId    String
+  sender           MessageSender
+  content          String
+  promptTokens     Int?          @default(0)
+  completionTokens Int?          @default(0)
+  retrievedContext Json?
+  createdAt        DateTime      @default(now())
+
+  chatSession ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+
+  @@index([chatSessionId])
+  @@map("chat_messages")
+}
+
+model PaymentOrder {
+  id                  String        @id @default(uuid())
+  externalId          String        @unique
+  xenditInvoiceId     String?
+  xenditPaymentMethod String?
+  studentId           String
+  creatorProfileId    String
+  tierId              String
+  amount              Float
+  platformFee         Float
+  creatorEarnings     Float
+  status              PaymentStatus @default(PENDING)
+  invoiceUrl          String?
+  paidAt              DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           temporal.updatedAt()
+
+  student        User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  creatorProfile CreatorProfile   @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  tier           SubscriptionTier @relation(fields: [tierId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([creatorProfileId])
+  @@index([status])
+  @@map("payment_orders")
+}
+
+model PayoutRequest {
+  id                    String       @id @default(uuid())
+  creatorProfileId      String
+  amount                Float
+  fee                   Float        @default(0)
+  netAmount             Float
+  bankName              String
+  bankAccountNumber     String
+  bankAccountHolderName String
+  status                PayoutStatus @default(PENDING)
+  xenditDisbursementId  String?
+  notes                 String?
+  createdAt             DateTime     @default(now())
+  updatedAt             temporal.updatedAt()
+
+  creatorProfile CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+
+  @@index([creatorProfileId])
+  @@index([status])
+  @@map("payout_requests")
+}
