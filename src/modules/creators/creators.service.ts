@@ -120,9 +120,9 @@ export class CreatorsService {
     );
     const totalLessonsMap = new Map(lessonStats.map((s) => [s.courseId, s.totalLessons]));
 
-    // 3. Subscribed students
+    // 3. Subscribed students (deduplicated by studentId, prioritizing ACTIVE status)
     const students: any[] = await this.prisma.$queryRawUnsafe(
-      `SELECT 
+      `SELECT DISTINCT ON (s."studentId")
         s.id as "subscriptionId",
         s."studentId",
         u."fullName",
@@ -135,7 +135,7 @@ export class CreatorsService {
       JOIN users u ON u.id = s."studentId"
       JOIN subscription_tiers st ON st.id = s."tierId"
       WHERE s."creatorProfileId" = $1
-      ORDER BY s."createdAt" DESC`,
+      ORDER BY s."studentId", (CASE WHEN s.status = 'ACTIVE' THEN 0 ELSE 1 END), s."createdAt" DESC`,
       creatorProfileId,
     );
 
