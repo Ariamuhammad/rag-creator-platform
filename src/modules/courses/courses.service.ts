@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +13,7 @@ import {
   CreateFullCourseDto,
 } from './dto/course.dto';
 import { SubscriptionStatus } from '../../common/types/enums';
+import * as pdfParse from 'pdf-parse';
 
 @Injectable()
 export class CoursesService {
@@ -540,5 +542,147 @@ export class CoursesService {
     }
 
     return enrolledList;
+  }
+
+  /**
+   * Generates a structured course syllabus with modules, lessons, and markdown content from an uploaded PDF.
+   */
+  async generateSyllabusFromPdf(
+    fileBuffer: Buffer,
+    originalName: string,
+    instructions?: string,
+    targetLevel?: string,
+  ) {
+    this.logger.log(`Generating course syllabus from PDF: ${originalName} (${fileBuffer.length} bytes)`);
+
+    // 1. Extract text using pdf-parse
+    let rawText = '';
+    try {
+      const parsePdf: any =
+        typeof pdfParse === 'function'
+          ? pdfParse
+          : (pdfParse as any)?.default || pdfParse;
+      const pdfData = await parsePdf(fileBuffer);
+      rawText = pdfData?.text || '';
+    } catch (parseErr: any) {
+      this.logger.error(`Error parsing PDF ${originalName}: ${parseErr.message}`);
+      throw new BadRequestException('Gagal mengekstrak teks dari dokumen PDF yang diunggah. Pastikan file PDF valid.');
+    }
+
+    if (!rawText.trim()) {
+      throw new BadRequestException('Dokumen PDF kosong atau berupa file scan gambar tanpa teks yang dapat dibaca.');
+    }
+
+    // 2. Prepare text window (up to 30,000 characters to cover comprehensive syllabus)
+    const textSnippet = rawText.slice(0, 30000);
+
+    // 3. Call Groq/OpenAI with structured output
+    const apiKey = process.env.OPENAI_API_KEY;
+    const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.groq.com/openai/v1';
+    const model = process.env.LLM_MODEL || 'openai/gpt-oss-120b';
+
+    const systemPrompt = `Anda adalah Kurator Pendidikan & Perancang Kurikulum Pembelajaran AI Kelas Dunia.
+Tugas Anda adalah membaca intisari teks dokumen materi (buku, handbook, kurikulum, panduan, slide, atau modul) yang diunggah oleh edukator, lalu mentransformasikannya menjadi Draf Silabus Kursus Pembelajaran yang terstruktur, menarik, sistematis, dan siap dipelajari murid.
+
+Aturan Pembuatan Silabus:
+1. title: Judul kursus yang menarik, profesional, dan mencerminkan esensi dokumen.
+2. slug: Kebab-case URL slug berdasarkan judul kursus (hanya huruf kecil, angka, dan strip).
+3. description: Deskripsi komprehensif kursus dalam 2-3 kalimat yang memikat calon murid.
+4. level: Tingkat kesulitan (${targetLevel && ['BEGINNER', 'INTERMEDIATE', 'ADVANCED'].includes(targetLevel) ? `Gunakan target: ${targetLevel}` : 'Tentukan "BEGINNER", "INTERMEDIATE", atau "ADVANCED" berdasarkan isi materi'}).
+5. modules: Susun menjadi 2 sampai 4 modul (bab) terstruktur logis.
+   - title: Judul bab profesional (misal: "Bab 1: Fondasi & Arsitektur Utama").
+   - description: Penjelasan kompetensi yang akan dicapai murid pada bab ini.
+   - lessons: 2 sampai 4 materi (lesson) per bab.
+     - title: Judul materi yang teratur (misal: "1.1 Pengenalan Konsep & Prinsip").
+     - type: Tipe materi, pilih salah satu: "reading", "video", atau "hybrid".
+     - duration: Estimasi durasi belajar, format angka + "min" (misal: "15 min", "20 min").
+     - videoPlacement: Jika tipe video/hybrid, pilih salah satu: "TOP", "MIDDLE", "BOTTOM". Default "TOP".
+     - contentMarkdown: KONTEN MATERI LENGKAP DALAM FORMAT MARKDOWN! Rangkum dan jelaskan materi dari dokumen secara mendalam, gunakan heading (#, ##, ###), poin-poin penjelasan, analogi, blockquote note (> [!NOTE]), dan ringkasan kunci. Jangan hanya menuliskan placeholder atau poin singkat, buatkan materi edukasi yang kaya, runtut, dan informatif.
+
+${instructions ? `Instruksi khusus dari Edukator:\n${instructions}\n` : ''}
+
+Format output HARUS selalu berupa JSON murni valid tanpa teks markdown backtick di luar JSON:
+{
+  "title": "...",
+  "slug": "...",
+  "description": "...",
+  "level": "BEGINNER" | "INTERMEDIATE" | "ADVANCED",
+  "modules": [
+    {
+      "title": "Bab 1: ...",
+      "description": "...",
+      "lessons": [
+        {
+          "title": "1.1 ...",
+          "type": "reading" | "video" | "hybrid",
+          "duration": "15 min",
+          "contentMarkdown": "# ...\\n\\n...",
+          "videoPlacement": "TOP",
+          "videoUrl": ""
+        }
+      ]
+    }
+  ]
+}`;
+
+    const userPrompt = `Nama Dokumen: ${originalName}
+Panjang Teks Dokumen: ${rawText.length} karakter
+
+Intisari Dokumen:
+${textSnippet}`;
+
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.3,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        this.logger.error(`LLM syllabus generation failed: ${response.status} - ${errorBody}`);
+        throw new Error(`LLM Error ${response.status}: ${errorBody}`);
+      }
+
+      const json = await response.json();
+      const content = json.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error('LLM tidak mengembalikan respons teks.');
+      }
+
+      const parsedSyllabus = JSON.parse(content);
+
+      // Sanitize and ensure fallback values
+      if (!parsedSyllabus.title) parsedSyllabus.title = originalName.replace(/\.[^/.]+$/, '');
+      if (!parsedSyllabus.slug) {
+        parsedSyllabus.slug = parsedSyllabus.title
+          .toLowerCase()
+          .replace(/[^\w\s-]/g, '')
+          .replace(/[\s_-]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+      }
+      if (!parsedSyllabus.level) parsedSyllabus.level = targetLevel || 'INTERMEDIATE';
+      if (!Array.isArray(parsedSyllabus.modules)) parsedSyllabus.modules = [];
+
+      return {
+        success: true,
+        sourceFileName: originalName,
+        courseDraft: parsedSyllabus,
+      };
+    } catch (llmErr: any) {
+      this.logger.error(`Failed to generate course syllabus: ${llmErr.message}`);
+      throw new BadRequestException(`Gagal menghasilkan silabus AI: ${llmErr.message}`);
+    }
   }
 }

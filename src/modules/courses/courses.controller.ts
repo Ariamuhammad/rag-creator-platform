@@ -6,13 +6,19 @@ import {
   Param,
   Body,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
+  ApiConsumes,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CoursesService } from './courses.service';
+import type { UploadedDocFile } from '../knowledge-base/knowledge-base.service';
 import {
   CreateCourseDto,
   CreateModuleDto,
@@ -31,6 +37,36 @@ import { UserRole } from '../../common/types/enums';
 @Controller('courses')
 export class CoursesController {
   constructor(private readonly coursesService: CoursesService) {}
+
+  @Post('generate-from-pdf')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.ADMIN)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 25 * 1024 * 1024 }, // 25MB max
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Generate structured course syllabus with modules, lessons, and rich markdown from an uploaded PDF using AI',
+  })
+  async generateFromPdf(
+    @UploadedFile() file: UploadedDocFile,
+    @Body('instructions') instructions?: string,
+    @Body('targetLevel') targetLevel?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('File PDF wajib diunggah.');
+    }
+    return this.coursesService.generateSyllabusFromPdf(
+      file.buffer,
+      file.originalname,
+      instructions,
+      targetLevel,
+    );
+  }
 
   @Post('full')
   @UseGuards(JwtAuthGuard, RolesGuard)

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { UnifiedCurriculumBuilder } from './UnifiedCurriculumBuilder';
+import { PdfToSyllabusModal } from './PdfToSyllabusModal';
 import type { SubscriptionTier, DocumentItem, PayoutRequest } from '../../types';
 
 interface CreatorStudioProps {
@@ -70,6 +71,9 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
   const [selectedCourseForEdit, setSelectedCourseForEdit] = useState<any>(null);
   const [uploadCourseId, setUploadCourseId] = useState<string>('');
 
+  // AI PDF to Syllabus Generator Modal State
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+
   // Quick Document-Course Assignment Modal State
   const [quickAssignCourse, setQuickAssignCourse] = useState<any | null>(null);
   const [quickSelectedDocIds, setQuickSelectedDocIds] = useState<string[]>([]);
@@ -88,6 +92,17 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
     } catch (e) {
       console.warn('Could not fetch creator courses:', e);
     }
+  };
+
+  const handleApplyPdfDraftToStudio = (draft: any) => {
+    setSelectedCourseForEdit({
+      title: draft.title,
+      slug: draft.slug,
+      description: draft.description,
+      level: draft.level,
+      modules: draft.modules,
+    });
+    setIsBuilderOpen(true);
   };
 
   const handleOpenQuickAssign = (course: any) => {
@@ -304,20 +319,32 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
               <div>
                 <h4 className="text-base font-bold text-zinc-100">Struktur Modul &amp; Silabus Pembelajaran</h4>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Susun kurikulum berjenjang dan tautkan dokumen RAG eksklusif secara terpadu tanpa berpindah-pindah modal.
+                  Susun kurikulum berjenjang atau gunakan AI untuk mengubah PDF materi menjadi silabus &amp; markdown secara instan.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCourseForEdit(null);
-                  setIsBuilderOpen(true);
-                }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Buka Studio Kurikulum Terpadu</span>
-              </button>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsPdfModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-semibold shadow-sm transition cursor-pointer"
+                  title="Ekstrak PDF buku/materi menjadi silabus & materi markdown lengkap dengan AI"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>Generate Silabus dari PDF (AI)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCourseForEdit(null);
+                    setIsBuilderOpen(true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Buka Studio Kurikulum</span>
+                </button>
+              </div>
             </div>
 
             {/* Courses Cards */}
@@ -934,6 +961,17 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
           </div>
         </div>
       )}
+
+      {/* AI PDF to Course Syllabus Generator Modal */}
+      <PdfToSyllabusModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        onApplyToCurriculumStudio={handleApplyPdfDraftToStudio}
+        onCourseCreated={() => {
+          fetchMyCourses();
+          onRefreshData();
+        }}
+      />
     </div>
   );
 };

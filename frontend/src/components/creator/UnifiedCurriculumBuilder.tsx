@@ -18,15 +18,17 @@ import {
   Loader2,
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { PdfToSyllabusModal } from './PdfToSyllabusModal';
 import type { DocumentItem } from '../../types';
 
 interface LessonDraft {
   id?: string;
   title: string;
-  type: 'reading' | 'video' | 'quiz';
+  type: 'reading' | 'video' | 'quiz' | 'hybrid' | string;
   duration: string;
   contentMarkdown?: string;
   videoUrl?: string;
+  videoPlacement?: 'TOP' | 'MIDDLE' | 'BOTTOM' | string;
   orderIndex: number;
 }
 
@@ -118,6 +120,32 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+
+  const handleApplyPdfDraft = (draft: any) => {
+    if (draft.title) setTitle(draft.title);
+    if (draft.slug) setSlug(draft.slug);
+    if (draft.description) setDescription(draft.description);
+    if (draft.level) setLevel(draft.level);
+    if (draft.modules && Array.isArray(draft.modules)) {
+      setModules(
+        draft.modules.map((m: any, mIdx: number) => ({
+          title: m.title,
+          description: m.description || '',
+          orderIndex: mIdx + 1,
+          lessons: (m.lessons || []).map((l: any, lIdx: number) => ({
+            title: l.title,
+            type: l.type || 'reading',
+            duration: l.duration || '15 min',
+            contentMarkdown: l.contentMarkdown || '',
+            videoUrl: l.videoUrl || '',
+            videoPlacement: l.videoPlacement || 'TOP',
+            orderIndex: lIdx + 1,
+          })),
+        }))
+      );
+    }
+  };
 
   // Helper to extract only numbers for lesson duration
   const extractDurationNumber = (val: string) => {
@@ -351,7 +379,17 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setIsPdfModalOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+            title="Generate silabus dan konten markdown otomatis dari dokumen PDF"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Generate dari PDF</span>
+          </button>
+
           <button
             type="button"
             onClick={onBack}
@@ -787,6 +825,13 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
           </button>
         </div>
       </div>
+
+      {/* AI PDF to Course Syllabus Generator Modal */}
+      <PdfToSyllabusModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        onApplyToCurriculumStudio={handleApplyPdfDraft}
+      />
     </div>
   );
 };

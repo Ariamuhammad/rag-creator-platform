@@ -227,6 +227,34 @@ class ApiService {
     });
   }
 
+  async generateSyllabusFromPdf(formData: FormData) {
+    return this.request<{
+      success: boolean;
+      sourceFileName: string;
+      courseDraft: {
+        title: string;
+        slug: string;
+        description: string;
+        level: string;
+        modules: {
+          title: string;
+          description: string;
+          lessons: {
+            title: string;
+            type: string;
+            duration: string;
+            contentMarkdown: string;
+            videoPlacement?: string;
+            videoUrl?: string;
+          }[];
+        }[];
+      };
+    }>('/courses/generate-from-pdf', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
   async getMyCourses() {
     return this.request<any[]>('/courses/my-courses');
   }
