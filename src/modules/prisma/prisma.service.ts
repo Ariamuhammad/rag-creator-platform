@@ -316,29 +316,64 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     creatorProfileId: string,
     queryEmbedding: number[],
     limit = 5,
-    similarityThreshold = 0.6,
+    similarityThreshold = 0.05,
     courseId?: string,
+    rawQueryText?: string,
   ): Promise<VectorSearchResult[]> {
     const vectorString = `[${queryEmbedding.join(',')}]`;
     const conn = await this.getConnection();
     const rows: VectorSearchResult[] = [];
 
+    // Extract sanitized keywords for Hybrid Search
+    let keywordScoreSql = '0.0';
+    if (rawQueryText && rawQueryText.trim().length > 0) {
+      const stopWords = new Set([
+        'apa', 'itu', 'yang', 'dimaksud', 'dengan', 'jelaskan', 'bagaimana', 'adalah', 'dan', 'di', 'ke', 'dari',
+        'tentang', 'apakah', 'siapa', 'mengapa', 'kenapa', 'bisa', 'tolong', 'pada', 'untuk',
+        'what', 'is', 'the', 'of', 'in', 'a', 'an', 'to', 'for', 'about', 'how', 'why', 'can', 'explain', 'tell', 'me'
+      ]);
+      const keywords = rawQueryText
+        .toLowerCase()
+        .replace(/[^a-zA-Z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !stopWords.has(w))
+        .map((w) => w.trim());
+
+      if (keywords.length > 0) {
+        keywordScoreSql = keywords
+          .map((kw) => `(CASE WHEN dc.content ILIKE '%${kw}%' THEN 1.0 ELSE 0.0 END)`)
+          .join(' + ');
+      }
+    }
+
     const sql = `
-      SELECT 
-        dc.id,
-        dc."documentId",
-        dc."creatorProfileId",
-        dc.content,
-        dc."chunkIndex",
-        dc.metadata,
-        (1 - (dc.embedding <=> $1::vector)) AS similarity
-      FROM document_chunks dc
-      JOIN documents d ON d.id = dc."documentId"
-      WHERE dc."creatorProfileId" = $2
-        AND ($5::text IS NULL OR d."courseId" = $5 OR d."courseId" IS NULL)
-        AND dc.embedding IS NOT NULL
-        AND (1 - (dc.embedding <=> $1::vector)) >= $3
-      ORDER BY dc.embedding <=> $1::vector ASC
+      WITH ranked AS (
+        SELECT 
+          dc.id,
+          dc."documentId",
+          dc."creatorProfileId",
+          dc.content,
+          dc."chunkIndex",
+          dc.metadata,
+          (1 - (dc.embedding <=> $1::vector)) AS vector_sim,
+          (${keywordScoreSql}) AS keyword_matches
+        FROM document_chunks dc
+        JOIN documents d ON d.id = dc."documentId"
+        WHERE dc."creatorProfileId" = $2
+          AND ($5::text IS NULL OR d."courseId" = $5 OR d."courseId" IS NULL)
+          AND dc.embedding IS NOT NULL
+      )
+      SELECT
+        id,
+        "documentId",
+        "creatorProfileId",
+        content,
+        "chunkIndex",
+        metadata,
+        (GREATEST(vector_sim, 0) + (keyword_matches * 0.35)) AS similarity
+      FROM ranked
+      WHERE (GREATEST(vector_sim, 0) + (keyword_matches * 0.35)) >= $3
+      ORDER BY (GREATEST(vector_sim, 0) + (keyword_matches * 0.35)) DESC
       LIMIT $4;
     `;
 
