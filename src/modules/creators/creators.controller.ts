@@ -73,4 +73,18 @@ export class CreatorsController {
   ) {
     return this.creatorsService.getAnalytics(creatorProfileId);
   }
+
+  @Get('analytics/student-activity')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Get comprehensive student learning activity, progress, and AI interaction analytics for creator',
+  })
+  async getStudentActivityAnalytics(
+    @CurrentUser('creatorProfileId') creatorProfileId: string,
+  ) {
+    return this.creatorsService.getStudentActivityAnalytics(creatorProfileId);
+  }
 }

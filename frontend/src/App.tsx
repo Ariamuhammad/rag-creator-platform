@@ -5,6 +5,7 @@ import { ClassroomWorkspace } from './components/classroom/ClassroomWorkspace';
 import { MasterSyllabusView } from './components/student/MasterSyllabusView';
 import { StudentView } from './components/student/StudentView';
 import { CreatorStudio } from './components/creator/CreatorStudio';
+import { StudentActivityDashboard } from './components/creator/StudentActivityDashboard';
 import { XenditCheckoutModal } from './components/modals/XenditCheckoutModal';
 import { PayoutRequestModal } from './components/modals/PayoutRequestModal';
 import { BankAccountModal } from './components/modals/BankAccountModal';
@@ -230,6 +231,48 @@ export function App() {
                 <h2 className="text-lg font-bold text-zinc-100">Akses Khusus Edukator</h2>
                 <p className="text-xs text-zinc-400 leading-relaxed">
                   Halaman Creator Studio dilindungi oleh hak akses <strong>CREATOR</strong>. Anda saat ini aktif menggunakan akun siswa (<strong>{userName}</strong>).
+                </p>
+                <div className="pt-2 flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentView('MASTER_SILABUS')}
+                    className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition"
+                  >
+                    Ke Master Silabus
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSwitchUser}
+                    className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-amber-950 font-bold text-xs transition"
+                  >
+                    Beralih ke Akun Edukator
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        )}
+
+        {currentView === 'STUDENT_ACTIVITY' && (
+          userRole === 'CREATOR' ? (
+            <div className="w-full flex-1">
+              <StudentActivityDashboard
+                onNavigateToCourse={(courseSlug) => {
+                  if (courseSlug) setActiveCourseSlug(courseSlug);
+                  setCurrentView('CLASSROOM');
+                }}
+                onPreviewClassroom={() => setCurrentView('CLASSROOM')}
+              />
+            </div>
+          ) : (
+            <div className="w-full flex-1 flex items-center justify-center p-6">
+              <div className="w-full max-w-md p-8 text-center space-y-4 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl animate-in zoom-in-95 duration-200">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 mx-auto flex items-center justify-center">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+                <h2 className="text-lg font-bold text-zinc-100">Akses Khusus Edukator</h2>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Halaman Aktivitas Murid dilindungi oleh hak akses <strong>CREATOR</strong>. Anda saat ini aktif menggunakan akun siswa (<strong>{userName}</strong>).
                 </p>
                 <div className="pt-2 flex items-center justify-center gap-3">
                   <button

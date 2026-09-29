@@ -5,11 +5,18 @@ import {
   Wallet,
   Coins,
   UserCircle,
-  CreditCard,
   Terminal,
+  Users,
+  BookOpen,
+  Compass,
 } from 'lucide-react';
 
-export type AppViewMode = 'CLASSROOM' | 'MASTER_SILABUS' | 'STOREFRONT' | 'CREATOR_STUDIO';
+export type AppViewMode =
+  | 'CLASSROOM'
+  | 'MASTER_SILABUS'
+  | 'STOREFRONT'
+  | 'CREATOR_STUDIO'
+  | 'STUDENT_ACTIVITY';
 
 interface HeaderProps {
   currentView: AppViewMode;
@@ -70,6 +77,19 @@ export const Header: React.FC<HeaderProps> = ({
 
                 <button
                   type="button"
+                  onClick={() => onViewChange('STUDENT_ACTIVITY')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition font-medium ${
+                    currentView === 'STUDENT_ACTIVITY'
+                      ? 'bg-zinc-800 text-white shadow-sm font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Aktivitas Murid</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => onViewChange('CLASSROOM')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition font-medium ${
                     currentView === 'CLASSROOM'
@@ -77,21 +97,8 @@ export const Header: React.FC<HeaderProps> = ({
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  <LayoutDashboard className="w-3.5 h-3.5 text-sky-400" />
+                  <BookOpen className="w-3.5 h-3.5 text-sky-400" />
                   <span>Classroom (Preview)</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onViewChange('MASTER_SILABUS')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition font-medium ${
-                    currentView === 'MASTER_SILABUS'
-                      ? 'bg-zinc-800 text-white shadow-sm font-semibold'
-                      : 'text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Master Silabus</span>
                 </button>
               </>
             ) : (
@@ -118,8 +125,8 @@ export const Header: React.FC<HeaderProps> = ({
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  <LayoutDashboard className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Classroom Workspace</span>
+                  <BookOpen className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Classroom</span>
                 </button>
 
                 <button
@@ -131,8 +138,8 @@ export const Header: React.FC<HeaderProps> = ({
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Paket Kursus (Xendit)</span>
+                  <Compass className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Katalog Kursus</span>
                 </button>
               </>
             )}

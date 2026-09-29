@@ -86,6 +86,14 @@ class ApiService {
     });
   }
 
+  async getCreatorAnalytics() {
+    return this.request<any>('/creators/analytics/overview');
+  }
+
+  async getStudentActivityAnalytics() {
+    return this.request<any>('/creators/analytics/student-activity');
+  }
+
   // --- KNOWLEDGE BASE ---
   async uploadDocument(formData: FormData) {
     return this.request<any>('/knowledge-base/upload', {
