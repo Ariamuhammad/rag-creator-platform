@@ -16,12 +16,31 @@ export class IngestionProcessor extends WorkerHost {
 
   constructor(private readonly prisma: PrismaService) {
     super();
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (apiKey && apiKey !== 'sk-placeholder-openai-api-key') {
+    const embeddingKey =
+      process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY;
+    const isGroq =
+      embeddingKey?.startsWith('gsk_') ||
+      process.env.OPENAI_BASE_URL?.includes('groq.com');
+
+    if (
+      embeddingKey &&
+      embeddingKey !== 'sk-placeholder-openai-api-key' &&
+      !isGroq
+    ) {
       this.embeddings = new OpenAIEmbeddings({
-        openAIApiKey: apiKey,
+        openAIApiKey: embeddingKey,
         modelName: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
+        ...(process.env.EMBEDDING_BASE_URL
+          ? { configuration: { baseURL: process.env.EMBEDDING_BASE_URL } }
+          : {}),
       });
+      this.logger.log(
+        `Initialized OpenAIEmbeddings (${process.env.EMBEDDING_MODEL || 'text-embedding-3-small'})`,
+      );
+    } else if (isGroq && !process.env.EMBEDDING_API_KEY) {
+      this.logger.log(
+        'Groq API detected for LLM (Groq does not provide embedding models). Using built-in deterministic 1536-dim vector embeddings.',
+      );
     }
   }
 

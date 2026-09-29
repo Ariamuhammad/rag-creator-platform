@@ -46,6 +46,27 @@ export class RagEngineService {
         temperature: 0.2,
       });
     }
+
+    // 2. Embeddings Model (OpenAI or custom embedding provider)
+    const embeddingKey =
+      process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY;
+    const isGroq =
+      embeddingKey?.startsWith('gsk_') ||
+      process.env.OPENAI_BASE_URL?.includes('groq.com');
+
+    if (
+      embeddingKey &&
+      embeddingKey !== 'sk-placeholder-openai-api-key' &&
+      !isGroq
+    ) {
+      this.embeddings = new OpenAIEmbeddings({
+        openAIApiKey: embeddingKey,
+        modelName: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
+        ...(process.env.EMBEDDING_BASE_URL
+          ? { configuration: { baseURL: process.env.EMBEDDING_BASE_URL } }
+          : {}),
+      });
+    }
   }
 
   /**
