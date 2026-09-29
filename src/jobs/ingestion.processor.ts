@@ -46,7 +46,11 @@ export class IngestionProcessor extends WorkerHost {
       // 3. Extract text content based on file type
       let rawText = '';
       if (fileType.toUpperCase() === 'PDF') {
-        const pdfData = await (pdfParse as any)(buffer);
+        const parsePdf: any =
+          typeof pdfParse === 'function'
+            ? pdfParse
+            : (pdfParse as any).default || pdfParse;
+        const pdfData = await parsePdf(buffer);
         rawText = pdfData.text;
       } else {
         // CSV, TXT, or transcript
@@ -101,7 +105,7 @@ export class IngestionProcessor extends WorkerHost {
         }
 
         const vectorString = `[${vectorArray.join(',')}]`;
-        const chunkId = require('crypto').randomUUID();
+        const chunkId = randomUUID();
 
         // 6. Direct SQL insertion to cast to pgvector vector(1536)
         await this.prisma.$executeRawUnsafe(
