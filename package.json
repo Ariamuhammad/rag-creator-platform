@@ -15,7 +15,8 @@
     "prisma:emit": "prisma contract emit",
     "prisma:update": "prisma db update",
     "prisma:plan": "prisma migration plan",
-    "prisma:migrate": "prisma db migrate"
+    "prisma:migrate": "prisma db migrate",
+    "seed": "bun run scripts/seed-platform.ts"
   },
   "dependencies": {
     "@langchain/core": "^0.3.43",
