@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Sparkles,
   Bot,
@@ -13,7 +15,7 @@ import {
   Plus,
   Compass,
 } from 'lucide-react';
-import type { CopilotMessage, CitationReference, PersonalNote } from '../../types/classroom';
+import type { CopilotMessage, PersonalNote } from '../../types/classroom';
 
 interface NotebookCopilotProps {
   creatorProfileId: string;
@@ -44,8 +46,6 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [attachedContext, setAttachedContext] = useState<string | null>(null);
 
-  // Active citation popover state
-  const [activeCitation, setActiveCitation] = useState<CitationReference | null>(null);
 
   // New Note Form State
   const [newNoteInput, setNewNoteInput] = useState('');
@@ -118,31 +118,12 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
         throw new Error(data.message || 'Gagal menghubungi AI Mentor');
       }
 
-      // Convert backend RAG sources into NotebookLM citations format
-      const generatedCitations: CitationReference[] = (data.sources || []).map((src: any, index: number) => ({
-        id: `cit_${Date.now()}_${index}`,
-        number: index + 1,
-        sourceTitle: src.documentTitle || src.metadata?.source || 'Dokumen Materi Kursus',
-        snippet: src.text || src.content || 'Potongan teks sumber terindeks.',
-        timestampOrPage: `Kutipan #${index + 1}`,
-        similarity: src.similarity || 0.89,
-      }));
-
-      // Append citation pills like [1], [2] to response
-      let formattedAnswer = data.answer || 'Tidak ada respons.';
-      if (generatedCitations.length > 0) {
-        formattedAnswer += `\n\n*Sumber Sitasi Materi Terindeks:* ${generatedCitations
-          .map((c) => `[${c.number}]`)
-          .join(' ')}`;
-      }
-
       const assistantMessage: CopilotMessage = {
         id: `asst_${Date.now()}`,
         sender: 'assistant',
-        content: formattedAnswer,
+        content: data.answer || 'Tidak ada respons.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         tokens: data.tokens,
-        citations: generatedCitations,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -239,36 +220,22 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
                 <div className={`max-w-[88%] space-y-2 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
                   {/* Bubble Container */}
                   <div
-                    className={`p-3 rounded-xl text-xs leading-relaxed ${
+                    className={`p-3.5 rounded-xl text-xs leading-relaxed ${
                       msg.sender === 'user'
                         ? 'bg-zinc-800 text-zinc-100 border border-zinc-700/60 font-sans'
-                        : 'bg-zinc-900/90 text-zinc-200 border border-zinc-800 font-sans'
+                        : 'bg-zinc-900/95 text-zinc-200 border border-zinc-800/80 shadow-sm font-sans'
                     }`}
                   >
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  </div>
-
-                  {/* NotebookLM Citations Pills */}
-                  {msg.citations && msg.citations.length > 0 && (
-                    <div className="space-y-1.5 pt-0.5">
-                      <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 block">
-                        Kutipan Sumber RAG:
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {msg.citations.map((citation) => (
-                          <button
-                            key={citation.id}
-                            type="button"
-                            onClick={() => setActiveCitation(citation)}
-                            className="px-2 py-0.5 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-indigo-500/50 text-[10px] text-zinc-300 flex items-center gap-1 font-mono transition"
-                          >
-                            <span className="font-bold text-indigo-400">[{citation.number}]</span>
-                            <span className="truncate max-w-[120px]">{citation.sourceTitle}</span>
-                          </button>
-                        ))}
+                    {msg.sender === 'user' ? (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    ) : (
+                      <div className="prose prose-invert prose-xs max-w-none space-y-2 [&_p]:leading-relaxed [&_strong]:text-indigo-300 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-1">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   {/* Token Consumption */}
                   {msg.tokens && (
@@ -457,41 +424,6 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
                 </div>
               ))
             )}
-          </div>
-        </div>
-      )}
-
-      {/* 3. Interactive Citation Drawer / Popover (NotebookLM Style) */}
-      {activeCitation && (
-        <div className="absolute inset-x-3 bottom-16 z-30 p-4 rounded-xl bg-zinc-900/95 border border-indigo-500/40 shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150 space-y-2.5">
-          <div className="flex justify-between items-start">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded bg-indigo-600 text-white font-bold text-xs flex items-center justify-center font-mono">
-                {activeCitation.number}
-              </span>
-              <div>
-                <h5 className="font-bold text-white text-xs">{activeCitation.sourceTitle}</h5>
-                <span className="text-[10px] text-zinc-400 font-mono">{activeCitation.timestampOrPage}</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setActiveCitation(null)}
-              className="text-zinc-400 hover:text-white p-1 rounded hover:bg-zinc-800"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 font-mono leading-relaxed">
-            "{activeCitation.snippet}"
-          </div>
-
-          <div className="flex justify-between items-center text-[10px] text-zinc-400">
-            <span className="text-emerald-400 font-mono">
-              Similarity Score: {(activeCitation.similarity * 100).toFixed(1)}%
-            </span>
-            <span className="text-zinc-500 font-sans">Konteks resmi terverifikasi pgvector</span>
           </div>
         </div>
       )}
