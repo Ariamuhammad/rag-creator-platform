@@ -21,6 +21,8 @@ import {
   Sparkles,
   Send,
   GraduationCap,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Lesson, KnowledgeSource } from '../../types/classroom';
@@ -44,6 +46,82 @@ interface LearningCanvasProps {
   onAddNoteFromHighlight: (highlightedText: string) => void;
   onMarkComplete: (lessonId: string) => void;
 }
+
+// Subcomponent for syntax blocks with dynamic labels and one-click copy button
+const CodeRenderer: React.FC<{
+  className?: string;
+  children?: React.ReactNode;
+  [key: string]: any;
+}> = ({
+  className,
+  children,
+  ...props
+}) => {
+  const [copied, setCopied] = useState(false);
+  const match = /language-(\w+)/.exec(className || '');
+  const isInline = !match && !String(children).includes('\n');
+
+  if (isInline) {
+    return (
+      <code
+        className="px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/50 font-mono text-xs text-indigo-300"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  }
+
+  const lang = match ? match[1].toLowerCase() : 'text';
+  const getSubLabel = (l: string) => {
+    if (l === 'python' || l === 'py') return 'Python 3.11+';
+    if (l === 'cypher' || l === 'gremlin') return 'PuppyGraph / Graph Query';
+    if (l === 'sql') return 'PostgreSQL / pgvector';
+    if (l === 'typescript' || l === 'ts') return 'TypeScript / Node.js';
+    if (l === 'text' || l === 'ascii' || l === 'mermaid') return 'Architecture Dataflow';
+    return 'Technical Implementation';
+  };
+
+  const handleCopy = () => {
+    const rawCode = String(children).replace(/\n$/, '');
+    navigator.clipboard.writeText(rawCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="rounded-xl bg-zinc-950 border border-zinc-800/90 overflow-hidden font-mono text-xs my-4 shadow-xl group">
+      <div className="px-4 py-2 bg-zinc-900/90 border-b border-zinc-800 text-zinc-400 flex justify-between items-center text-[11px]">
+        <div className="flex items-center gap-2">
+          <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 font-semibold uppercase tracking-wider text-[10px] border border-indigo-500/20">
+            {match ? match[1] : 'snippet'}
+          </span>
+          <span className="text-zinc-500 text-[11px] font-sans">{getSubLabel(lang)}</span>
+        </div>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/70 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700/50 text-[11px] transition cursor-pointer font-sans"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-emerald-400 font-medium">Tersalin!</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Salin Kode</span>
+            </>
+          )}
+        </button>
+      </div>
+      <pre className="p-4 text-emerald-300/95 leading-relaxed overflow-x-auto selection:bg-indigo-500/30 selection:text-white font-mono">
+        <code>{children}</code>
+      </pre>
+    </div>
+  );
+};
 
 // Helper to parse YouTube, Vimeo, and direct MP4/WebM video URLs into embeddable sources
 const getVideoEmbedInfo = (url?: string) => {
@@ -467,25 +545,7 @@ export const LearningCanvas: React.FC<LearningCanvasProps> = ({
                           {children}
                         </blockquote>
                       ),
-                      code: ({ className, children, ...props }: any) => {
-                        const match = /language-(\w+)/.exec(className || '');
-                        const isInline = !match && !String(children).includes('\n');
-                        return isInline ? (
-                          <code className="px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/50 font-mono text-xs text-indigo-300" {...props}>
-                            {children}
-                          </code>
-                        ) : (
-                          <div className="rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden font-mono text-xs my-4 shadow-lg">
-                            <div className="px-4 py-2 bg-zinc-900/80 border-b border-zinc-800 text-zinc-400 flex justify-between items-center text-[11px]">
-                              <span className="text-indigo-400 uppercase font-semibold">{match ? match[1] : 'snippet'}</span>
-                              <span className="text-zinc-500">PostgreSQL / RAG Engine</span>
-                            </div>
-                            <pre className="p-4 text-emerald-400 leading-relaxed overflow-x-auto">
-                              <code>{children}</code>
-                            </pre>
-                          </div>
-                        );
-                      },
+                      code: CodeRenderer,
                       table: ({ children }) => (
                         <div className="overflow-x-auto my-4 p-1 rounded-xl bg-zinc-950 border border-zinc-800">
                           <table className="w-full text-left text-xs border-collapse">
@@ -681,25 +741,7 @@ export const LearningCanvas: React.FC<LearningCanvasProps> = ({
                         {children}
                       </blockquote>
                     ),
-                    code: ({ className, children, ...props }: any) => {
-                      const match = /language-(\w+)/.exec(className || '');
-                      const isInline = !match && !String(children).includes('\n');
-                      return isInline ? (
-                        <code className="px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/50 font-mono text-xs text-indigo-300" {...props}>
-                          {children}
-                        </code>
-                      ) : (
-                        <div className="rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden font-mono text-xs my-4 shadow-lg">
-                          <div className="px-4 py-2 bg-zinc-900/80 border-b border-zinc-800 text-zinc-400 flex justify-between items-center text-[11px]">
-                            <span className="text-indigo-400 uppercase font-semibold">{match ? match[1] : 'snippet'}</span>
-                            <span className="text-zinc-500">PostgreSQL / RAG Engine</span>
-                          </div>
-                          <pre className="p-4 text-emerald-400 leading-relaxed overflow-x-auto">
-                            <code>{children}</code>
-                          </pre>
-                        </div>
-                      );
-                    },
+                    code: CodeRenderer,
                     table: ({ children }) => (
                       <div className="overflow-x-auto my-4 p-1 rounded-xl bg-zinc-950 border border-zinc-800">
                         <table className="w-full text-left text-xs border-collapse">

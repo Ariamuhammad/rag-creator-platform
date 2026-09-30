@@ -573,31 +573,55 @@ export class CoursesService {
       throw new BadRequestException('Dokumen PDF kosong atau berupa file scan gambar tanpa teks yang dapat dibaca.');
     }
 
-    // 2. Prepare text window (up to 30,000 characters to cover comprehensive syllabus)
-    const textSnippet = rawText.slice(0, 30000);
+    // 2. Intelligent Multi-Segment Text Sampling (up to 45,000 characters)
+    // Avoids sampling only intro pages by taking representative slices across the entire document
+    let textSnippet = '';
+    const maxChars = 45000;
+    if (rawText.length <= maxChars) {
+      textSnippet = rawText;
+    } else {
+      const partLength = Math.floor(maxChars / 3);
+      const head = rawText.slice(0, partLength);
+      const midStart = Math.floor((rawText.length - partLength) / 2);
+      const mid = rawText.slice(midStart, midStart + partLength);
+      const tail = rawText.slice(rawText.length - partLength);
+      textSnippet = `--- [BAGIAN 1: INTRODUKSI, DEFINISI & FONDASI] ---\n${head}\n\n--- [BAGIAN 2: ARSITEKTUR, ALGORITMA & KOMPONEN INTI] ---\n${mid}\n\n--- [BAGIAN 3: ADVANCED TECHNIQUES, IMPLEMENTASI & EVALUASI] ---\n${tail}`;
+    }
 
     // 3. Call Groq/OpenAI with structured output
     const apiKey = process.env.OPENAI_API_KEY;
     const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.groq.com/openai/v1';
     const model = process.env.LLM_MODEL || 'openai/gpt-oss-120b';
 
-    const systemPrompt = `Anda adalah Kurator Pendidikan & Perancang Kurikulum Pembelajaran AI Kelas Dunia.
-Tugas Anda adalah membaca intisari teks dokumen materi (buku, handbook, kurikulum, panduan, slide, atau modul) yang diunggah oleh edukator, lalu mentransformasikannya menjadi Draf Silabus Kursus Pembelajaran yang terstruktur, menarik, sistematis, dan siap dipelajari murid.
+    const systemPrompt = `Anda adalah Principal Systems Architect & Kurator Pendidikan Teknikal Kelas Dunia.
+Tugas Anda adalah membaca intisari teks dokumen materi (buku, handbook, kurikulum, panduan, slide, atau modul) yang diunggah edukator, lalu merombaknya menjadi Draf Kurikulum Silabus Kursus Masterclass yang mendalam, profesional, dan BEBAS DARI AI SLOP.
 
-Aturan Pembuatan Silabus:
-1. title: Judul kursus yang menarik, profesional, dan mencerminkan esensi dokumen.
-2. slug: Kebab-case URL slug berdasarkan judul kursus (hanya huruf kecil, angka, dan strip).
-3. description: Deskripsi komprehensif kursus dalam 2-3 kalimat yang memikat calon murid.
-4. level: Tingkat kesulitan (${targetLevel && ['BEGINNER', 'INTERMEDIATE', 'ADVANCED'].includes(targetLevel) ? `Gunakan target: ${targetLevel}` : 'Tentukan "BEGINNER", "INTERMEDIATE", atau "ADVANCED" berdasarkan isi materi'}).
-5. modules: Susun menjadi 2 sampai 4 modul (bab) terstruktur logis.
-   - title: Judul bab profesional (misal: "Bab 1: Fondasi & Arsitektur Utama").
-   - description: Penjelasan kompetensi yang akan dicapai murid pada bab ini.
-   - lessons: 2 sampai 4 materi (lesson) per bab.
-     - title: Judul materi yang teratur (misal: "1.1 Pengenalan Konsep & Prinsip").
-     - type: Tipe materi, pilih salah satu: "reading", "video", atau "hybrid".
-     - duration: Estimasi durasi belajar, format angka + "min" (misal: "15 min", "20 min").
-     - videoPlacement: Jika tipe video/hybrid, pilih salah satu: "TOP", "MIDDLE", "BOTTOM". Default "TOP".
-     - contentMarkdown: KONTEN MATERI LENGKAP DALAM FORMAT MARKDOWN! Rangkum dan jelaskan materi dari dokumen secara mendalam, gunakan heading (#, ##, ###), poin-poin penjelasan, analogi, blockquote note (> [!NOTE]), dan ringkasan kunci. Jangan hanya menuliskan placeholder atau poin singkat, buatkan materi edukasi yang kaya, runtut, dan informatif.
+PRINSIP ANTI-AI SLOP (ZERO SLOP MANIFESTO):
+1. DILARANG DAFTAR POIN DANGKAL (BULLET-POINT SOUP): Jangan hanya membuat daftar bullet points berisi definisi abstrak atau ringkasan 2 baris. Tulis penjelasan dalam paragraf narasi teknis berbobot tinggi layaknya buku engineering O'Reilly.
+2. DILARANG BASA-BASI AI: Jangan pernah menulis pengantar klise ("Pada modul ini kita akan belajar...", "Selamat datang di...") atau penutup klise ("Kesimpulannya...", "Semoga membantu!"). Langsung masuki substansi teknis dengan tajam pada kalimat pertama.
+3. KEDALAMAN (DEPTH) LEBIH UTAMA DARIPADA KUANTITAS: Buat 2 hingga 3 Modul terstruktur, dengan masing-masing 2 hingga 3 Lessons berkualitas tinggi. Setiap materi harus padat ilmu, konkret, dan bernilai jual tinggi.
+4. KOMPONEN WAJIB DI SETIAP LESSON (contentMarkdown):
+   - Diagram Alur / Arsitektur: Minimal 1 representasi visual arsitektur menggunakan ASCII diagram yang rapi di dalam code block teks (\`\`\`text ... \`\`\`) untuk menjelaskan dataflow atau interaksi komponen.
+   - Analisis & Deep Dive Teknis: Penjelasan detail mengenai mekanisme internal, trade-offs, kompleksitas, atau benchmark relevan dari materi dokumen.
+   - Blok Kode / Konfigurasi Nyata: Minimal 1 blok kode implementasi nyata / production-grade code snippet (Python, TypeScript, SQL/Cypher, atau JSON/YAML konfigurasi) lengkap dengan penamaan variabel realistis dan komentar inline penjelas.
+   - Production Gotchas & Best Practices: Gunakan blok peringatan (> [!WARNING] atau > [!NOTE]) yang mengulas failure modes, latency bottlenecks, atau jebakan implementasi di industri nyata.
+   - Format Istilah: Format semua istilah teknis penting menggunakan bold (**term**). Jangan gunakan tanda kutip tunggal/ganda pada istilah teknis.
+
+Struktur JSON yang WAJIB dihasilkan:
+- title: Judul kursus komprehensif, teknis, dan berwibawa.
+- slug: Kebab-case URL slug berdasarkan judul kursus (contoh: mastering-rag-and-graphrag-architecture).
+- description: Ringkasan teknis kurikulum dalam 2-3 kalimat tajam.
+- level: ${targetLevel && ['BEGINNER', 'INTERMEDIATE', 'ADVANCED'].includes(targetLevel) ? `"${targetLevel}"` : 'Tentukan "BEGINNER", "INTERMEDIATE", atau "ADVANCED" berdasarkan bobot materi'}.
+- modules: Array 2-3 modul berbobot.
+  - title: Judul modul profesional (contoh: "Modul 1: Fondasi Vektor & Triad RAG").
+  - description: Deskripsi kapabilitas teknis yang dipelajari murid di modul ini.
+  - lessons: Array 2-3 materi per modul.
+    - title: Judul materi spesifik & terstruktur (contoh: "1.1 Arsitektur Dense Retrieval & Vector Similarity").
+    - type: "reading" | "video" | "hybrid" (berikan variasi natural reading & hybrid).
+    - duration: "15 min" | "20 min" | "25 min".
+    - videoPlacement: "TOP" (default).
+    - videoUrl: "" (kosongkan jika belum ada video).
+    - contentMarkdown: Konten materi masterclass lengkap dengan format markdown yang kaya sesuai 4 Komponen Wajib di atas.
 
 ${instructions ? `Instruksi khusus dari Edukator:\n${instructions}\n` : ''}
 
@@ -606,19 +630,19 @@ Format output HARUS selalu berupa JSON murni valid tanpa teks markdown backtick 
   "title": "...",
   "slug": "...",
   "description": "...",
-  "level": "BEGINNER" | "INTERMEDIATE" | "ADVANCED",
+  "level": "INTERMEDIATE",
   "modules": [
     {
-      "title": "Bab 1: ...",
+      "title": "Modul 1: ...",
       "description": "...",
       "lessons": [
         {
           "title": "1.1 ...",
-          "type": "reading" | "video" | "hybrid",
-          "duration": "15 min",
-          "contentMarkdown": "# ...\\n\\n...",
+          "type": "reading",
+          "duration": "20 min",
           "videoPlacement": "TOP",
-          "videoUrl": ""
+          "videoUrl": "",
+          "contentMarkdown": "# 1.1 ...\\n\\n..."
         }
       ]
     }
@@ -646,6 +670,7 @@ ${textSnippet}`;
           ],
           response_format: { type: 'json_object' },
           temperature: 0.3,
+          max_tokens: 8000,
         }),
       });
 
