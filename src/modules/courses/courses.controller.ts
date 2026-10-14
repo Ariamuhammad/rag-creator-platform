@@ -9,6 +9,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -25,6 +26,7 @@ import {
   CreateLessonDto,
   UpdateProgressDto,
   CreateFullCourseDto,
+  PdfFallbackDto,
 } from './dto/course.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
@@ -32,6 +34,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../../common/types/enums';
+import type { Request } from 'express';
 
 @ApiTags('Courses & Syllabus')
 @Controller('courses')
@@ -53,6 +56,7 @@ export class CoursesController {
       'Generate structured course syllabus with modules, lessons, and rich markdown from an uploaded PDF using AI',
   })
   async generateFromPdf(
+    @CurrentUser('id') userId: string,
     @UploadedFile() file: UploadedDocFile,
     @Body('instructions') instructions?: string,
     @Body('targetLevel') targetLevel?: string,
@@ -60,12 +64,51 @@ export class CoursesController {
     if (!file) {
       throw new BadRequestException('File PDF wajib diunggah.');
     }
+    if (
+      instructions !== undefined &&
+      (typeof instructions !== 'string' || instructions.length > 3000)
+    ) {
+      throw new BadRequestException(
+        'Instruksi silabus maksimal 3000 karakter.',
+      );
+    }
+    if (
+      targetLevel !== undefined &&
+      !['BEGINNER', 'INTERMEDIATE', 'ADVANCED'].includes(targetLevel)
+    ) {
+      throw new BadRequestException('Level silabus tidak valid.');
+    }
     return this.coursesService.generateSyllabusFromPdf(
       file.buffer,
       file.originalname,
       instructions,
       targetLevel,
+      userId,
     );
+  }
+
+  @Post('generate-from-pdf/server-fallback')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CREATOR, UserRole.ADMIN)
+  async fallbackPdf(
+    @CurrentUser('id') userId: string,
+    @Body() dto: PdfFallbackDto,
+    @Req() req: Request,
+  ) {
+    const controller = new AbortController();
+    const cancel = () => {
+      if (!req.res?.writableEnded) controller.abort();
+    };
+    req.res?.on('close', cancel);
+    try {
+      return await this.coursesService.fallbackSyllabus(
+        userId,
+        dto.token,
+        controller.signal,
+      );
+    } finally {
+      req.res?.off('close', cancel);
+    }
   }
 
   @Post('full')
@@ -73,7 +116,8 @@ export class CoursesController {
   @Roles(UserRole.CREATOR, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Unified Curriculum Builder: Creator creates course, modules, lessons, and assigns RAG docs in one request',
+    summary:
+      'Unified Curriculum Builder: Creator creates course, modules, lessons, and assigns RAG docs in one request',
   })
   async createFullCourse(
     @CurrentUser('id') userId: string,
@@ -99,7 +143,8 @@ export class CoursesController {
   @Roles(UserRole.CREATOR, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Creator gets all courses created by them with full modules, lessons, and assigned RAG documents',
+    summary:
+      'Creator gets all courses created by them with full modules, lessons, and assigned RAG documents',
   })
   async getMyCourses(@CurrentUser('id') userId: string) {
     return this.coursesService.getMyCourses(userId);
@@ -115,7 +160,8 @@ export class CoursesController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Master Silabus: Get enrolled courses, completion %, tier name, & credits for student',
+    summary:
+      'Master Silabus: Get enrolled courses, completion %, tier name, & credits for student',
   })
   async getEnrolledCourses(@CurrentUser('id') studentId: string) {
     return this.coursesService.getEnrolledCourses(studentId);
@@ -123,7 +169,10 @@ export class CoursesController {
 
   @Get('slug/:slug')
   @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Get course curriculum and syllabus by slug (authenticated student sees progress)' })
+  @ApiOperation({
+    summary:
+      'Get course curriculum and syllabus by slug (authenticated student sees progress)',
+  })
   async getCourseBySlug(
     @Param('slug') slug: string,
     @CurrentUser('id') studentId?: string,

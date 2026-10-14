@@ -37,6 +37,8 @@ export interface CitationReference {
 }
 
 export interface CopilotMessage {
+  mode?: 'generated' | 'sources';
+  sources?: { documentId: string; documentTitle?: string; content: string; chunkIndex?: number }[];
   id: string;
   sender: 'user' | 'assistant';
   content: string;

@@ -272,10 +272,12 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
    * Prisma 8 Transaction Runner
    */
   async $transaction<T>(
-    fn: (tx: ReturnType<typeof createDatabaseFacade>) => Promise<T>,
+    fn: (tx: ReturnType<typeof createDatabaseFacade> & {
+      query: ReturnType<typeof db.runtime>['query'];
+    }) => Promise<T>,
   ): Promise<T> {
     return db.transaction(async (tx) => {
-      const txFacade = createDatabaseFacade(tx.orm);
+      const txFacade = { ...createDatabaseFacade(tx.orm), query: tx.query.bind(tx) };
       return fn(txFacade);
     });
   }
@@ -314,13 +316,14 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
    */
   async searchSimilarChunks(
     creatorProfileId: string,
-    queryEmbedding: number[],
+    queryEmbedding: number[] | null,
     limit = 5,
     similarityThreshold = 0.05,
     courseId?: string,
     rawQueryText?: string,
+    embeddingSpace?: string,
   ): Promise<VectorSearchResult[]> {
-    const vectorString = `[${queryEmbedding.join(',')}]`;
+    const vectorString = queryEmbedding ? `[${queryEmbedding.join(',')}]` : null;
     const conn = await this.getConnection();
     const rows: VectorSearchResult[] = [];
 
@@ -355,13 +358,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           dc.content,
           dc."chunkIndex",
           dc.metadata,
-          (1 - (dc.embedding <=> $1::vector)) AS vector_sim,
+          (CASE WHEN d.status = 'COMPLETED' AND $1::vector IS NOT NULL AND dc.metadata->>'embeddingSpace' = $6
+            THEN 1 - (dc.embedding <=> $1::vector) ELSE 0 END) AS vector_sim,
           (${keywordScoreSql}) AS keyword_matches
         FROM document_chunks dc
         JOIN documents d ON d.id = dc."documentId"
+        LEFT JOIN courses c ON c.id = d."courseId"
         WHERE dc."creatorProfileId" = $2
           AND ($5::text IS NULL OR d."courseId" = $5 OR d."courseId" IS NULL)
-          AND dc.embedding IS NOT NULL
+          AND (d."courseId" IS NULL OR c."isPublished" = TRUE)
+          AND d.status IN ('COMPLETED', 'PENDING')
       )
       SELECT
         id,
@@ -379,7 +385,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
 
     for await (const row of (conn as any).driver.query({
       sql,
-      params: [vectorString, creatorProfileId, similarityThreshold, limit, courseId || null],
+      params: [vectorString, creatorProfileId, similarityThreshold, limit, courseId || null, embeddingSpace || null],
     })) {
       rows.push(row as VectorSearchResult);
     }

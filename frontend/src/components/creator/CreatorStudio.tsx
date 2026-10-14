@@ -1,3 +1,4 @@
+import { BrowserAiStatus } from '../BrowserAiStatus';
 import React, { useState, useEffect } from 'react';
 import {
   Wallet,
@@ -54,6 +55,8 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
   // File Upload State
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
+  const uploadRef = React.useRef<AbortController | null>(null);
+  useEffect(() => () => uploadRef.current?.abort(), []);
 
   // New Tier Form State
   const [showTierForm, setShowTierForm] = useState(false);
@@ -83,7 +86,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
     fetchMyCourses();
   }, []);
 
-  const fetchMyCourses = async () => {
+  async function fetchMyCourses() {
     try {
       const data = await api.getMyCourses().catch(() => null);
       if (data && Array.isArray(data)) {
@@ -92,7 +95,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
     } catch (e) {
       console.warn('Could not fetch creator courses:', e);
     }
-  };
+  }
 
   const handleApplyPdfDraftToStudio = (draft: any) => {
     setSelectedCourseForEdit({
@@ -100,6 +103,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
       slug: draft.slug,
       description: draft.description,
       level: draft.level,
+      isPublished: false,
       modules: draft.modules,
     });
     setIsBuilderOpen(true);
@@ -137,6 +141,8 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
     if (!file) return;
 
     setIsUploading(true);
+    const controller = new AbortController();
+    uploadRef.current = controller;
     const formData = new FormData();
     formData.append('file', file);
     formData.append('title', file.name);
@@ -145,18 +151,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
     }
 
     try {
-      const res = await fetch('/api/v1/knowledge-base/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('rag_token')}`,
-        },
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || 'Gagal mengunggah dokumen');
-      }
+      await api.uploadDocument(formData, controller.signal);
 
       setUploadSuccess(true);
       setTimeout(() => {
@@ -165,8 +160,10 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
         fetchMyCourses();
       }, 1500);
     } catch (err: any) {
-      alert(`Error upload: ${err.message}`);
+      if (err.name !== 'AbortError') alert(`Error upload: ${err.message}`);
+      onRefreshData();
     } finally {
+      uploadRef.current = null;
       setIsUploading(false);
     }
   };
@@ -306,6 +303,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
             onBack={() => {
               setIsBuilderOpen(false);
               setSelectedCourseForEdit(null);
+              onRefreshData();
             }}
             onSuccess={() => {
               setIsBuilderOpen(false);
@@ -369,7 +367,7 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
                             {course.level}
                           </span>
                           <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            PUBLISHED
+                            {course.isPublished ? 'PUBLISHED' : 'DRAFT'}
                           </span>
                         </div>
                         <p className="text-xs text-zinc-400 mt-1 max-w-3xl">{course.description}</p>
@@ -624,6 +622,8 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
                 Mendukung file PDF dan CSV. Sistem akan otomatis mengekstrak teks, memecah chunks, dan menghasilkan pgvector embeddings.
               </p>
             </div>
+            <BrowserAiStatus />
+            {isUploading && <button type="button" onClick={() => uploadRef.current?.abort()} className="text-xs text-indigo-300">Batalkan proses</button>}
             {/* Target Course Selector for Upload */}
             <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 text-xs">
               <span className="text-zinc-400 font-medium">Tautkan Langsung ke Kursus:</span>
@@ -711,6 +711,15 @@ export const CreatorStudio: React.FC<CreatorStudioProps> = ({
                           >
                             {doc.status}
                           </span>
+                          {doc.status !== 'PROCESSING' && doc.status !== 'FAILED' && (
+                            <button type="button" disabled={isUploading} className="block mt-2 text-indigo-300 hover:text-indigo-200 disabled:opacity-50" onClick={async () => {
+                              setIsUploading(true);
+                                const controller = new AbortController(); uploadRef.current = controller;
+                                try { await api.indexDocument(doc.id, controller.signal); }
+                                catch (error) { if ((error as Error).name !== 'AbortError') alert(error instanceof Error ? error.message : 'Gagal mengindeks materi.'); }
+                                finally { uploadRef.current = null; setIsUploading(false); onRefreshData(); }
+                            }}>Indeks di perangkat</button>
+                          )}
                         </td>
                         <td className="py-2.5">
                           <select

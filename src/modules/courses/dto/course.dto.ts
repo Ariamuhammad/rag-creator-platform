@@ -1,5 +1,18 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class PdfFallbackDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(50000)
+  token: string;
+}
 
 export class CreateCourseDto {
   @ApiProperty({ example: 'Enterprise Multi-Tenant RAG & Vector Systems' })
@@ -12,7 +25,9 @@ export class CreateCourseDto {
   @IsNotEmpty()
   slug: string;
 
-  @ApiPropertyOptional({ example: 'Panduan arsitektur sistem RAG dengan pgvector dan BullMQ.' })
+  @ApiPropertyOptional({
+    example: 'Panduan arsitektur sistem RAG dengan pgvector dan BullMQ.',
+  })
   @IsString()
   @IsOptional()
   description?: string;
@@ -34,7 +49,9 @@ export class CreateModuleDto {
   @IsNotEmpty()
   title: string;
 
-  @ApiPropertyOptional({ example: 'Eksplorasi mendalam indeks graf HNSW vs IVFFlat' })
+  @ApiPropertyOptional({
+    example: 'Eksplorasi mendalam indeks graf HNSW vs IVFFlat',
+  })
   @IsString()
   @IsOptional()
   description?: string;
@@ -45,7 +62,9 @@ export class CreateModuleDto {
 }
 
 export class CreateLessonDto {
-  @ApiProperty({ example: '3.2 Arsitektur Indexing: HNSW vs IVFFlat pada PostgreSQL' })
+  @ApiProperty({
+    example: '3.2 Arsitektur Indexing: HNSW vs IVFFlat pada PostgreSQL',
+  })
   @IsString()
   @IsNotEmpty()
   title: string;
@@ -82,6 +101,14 @@ export class UpdateProgressDto {
 }
 
 export class CreateFullCourseDto {
+  @IsOptional()
+  @IsBoolean()
+  isPublished?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  reviewed?: boolean;
+
   @ApiProperty({ example: 'Enterprise Multi-Tenant RAG & Vector Systems' })
   @IsString()
   @IsNotEmpty()
@@ -92,7 +119,9 @@ export class CreateFullCourseDto {
   @IsNotEmpty()
   slug: string;
 
-  @ApiPropertyOptional({ example: 'Panduan arsitektur sistem RAG dengan pgvector dan BullMQ.' })
+  @ApiPropertyOptional({
+    example: 'Panduan arsitektur sistem RAG dengan pgvector dan BullMQ.',
+  })
   @IsString()
   @IsOptional()
   description?: string;
@@ -107,7 +136,10 @@ export class CreateFullCourseDto {
   @IsOptional()
   level?: string;
 
-  @ApiPropertyOptional({ description: 'Array of Document IDs to assign to this course', example: ['doc-1', 'doc-2'] })
+  @ApiPropertyOptional({
+    description: 'Array of Document IDs to assign to this course',
+    example: ['doc-1', 'doc-2'],
+  })
   @IsOptional()
   documentIds?: string[];
 

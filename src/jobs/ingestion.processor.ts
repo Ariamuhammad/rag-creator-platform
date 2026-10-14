@@ -5,43 +5,15 @@ import { PrismaService } from '../modules/prisma/prisma.service';
 import { IngestionJobPayload } from '../modules/knowledge-base/knowledge-base.service';
 import { DocumentStatus } from '../common/types/enums';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
-import { OpenAIEmbeddings } from '@langchain/openai';
+import { AiService } from '../modules/ai/ai.service';
 import * as pdfParse from 'pdf-parse';
 import { randomUUID } from 'crypto';
 
 @Processor('document-ingestion')
 export class IngestionProcessor extends WorkerHost {
   private readonly logger = new Logger(IngestionProcessor.name);
-  private embeddings: OpenAIEmbeddings | null = null;
-
-  constructor(private readonly prisma: PrismaService) {
+  constructor(private readonly prisma: PrismaService, private readonly ai: AiService) {
     super();
-    const embeddingKey =
-      process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY;
-    const isGroq =
-      embeddingKey?.startsWith('gsk_') ||
-      process.env.OPENAI_BASE_URL?.includes('groq.com');
-
-    if (
-      embeddingKey &&
-      embeddingKey !== 'sk-placeholder-openai-api-key' &&
-      !isGroq
-    ) {
-      this.embeddings = new OpenAIEmbeddings({
-        openAIApiKey: embeddingKey,
-        modelName: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
-        ...(process.env.EMBEDDING_BASE_URL
-          ? { configuration: { baseURL: process.env.EMBEDDING_BASE_URL } }
-          : {}),
-      });
-      this.logger.log(
-        `Initialized OpenAIEmbeddings (${process.env.EMBEDDING_MODEL || 'text-embedding-3-small'})`,
-      );
-    } else if (isGroq && !process.env.EMBEDDING_API_KEY) {
-      this.logger.log(
-        'Groq API detected for LLM (Groq does not provide embedding models). Using built-in deterministic 1536-dim vector embeddings.',
-      );
-    }
   }
 
   async process(job: Job<IngestionJobPayload, any, string>): Promise<any> {
@@ -108,22 +80,9 @@ export class IngestionProcessor extends WorkerHost {
         const chunkIndex = i;
         const tokenEstimate = Math.ceil(chunkContent.length / 4);
 
-        let vectorArray: number[];
-        if (this.embeddings) {
-          try {
-            vectorArray = await this.embeddings.embedQuery(chunkContent);
-          } catch (embedErr: any) {
-            this.logger.warn(
-              `Embedding API call failed (${embedErr?.message || embedErr}). Using deterministic embedding vector.`,
-            );
-            vectorArray = this.generateFallbackVector(chunkContent, 1536);
-          }
-        } else {
-          // Deterministic fallback vector for development/testing if no API key is set
-          vectorArray = this.generateFallbackVector(chunkContent, 1536);
-        }
+        const vectorArray = this.ai.browser ? null : await this.ai.embed(chunkContent, true);
 
-        const vectorString = `[${vectorArray.join(',')}]`;
+        const vectorString = vectorArray ? `[${vectorArray.join(',')}]` : null;
         const chunkId = randomUUID();
 
         // 6. Direct SQL insertion to cast to pgvector vector(1536)
@@ -141,7 +100,7 @@ export class IngestionProcessor extends WorkerHost {
           chunkContent,
           chunkIndex,
           tokenEstimate,
-          JSON.stringify(chunk.metadata),
+          JSON.stringify({ ...chunk.metadata, ...(this.ai.browser ? {} : { embeddingSpace: this.ai.embeddingSpace }) }),
           vectorString,
         );
       }
@@ -150,7 +109,7 @@ export class IngestionProcessor extends WorkerHost {
       await this.prisma.document.update({
         where: { id: documentId },
         data: {
-          status: DocumentStatus.COMPLETED,
+          status: this.ai.browser ? DocumentStatus.PENDING : DocumentStatus.COMPLETED,
           errorMessage: null,
         },
       });
@@ -160,7 +119,7 @@ export class IngestionProcessor extends WorkerHost {
       );
 
       return {
-        status: 'SUCCESS',
+        status: this.ai.browser ? 'AWAITING_BROWSER_EMBEDDINGS' : 'SUCCESS',
         documentId,
         chunksCount: docs.length,
       };
@@ -179,22 +138,4 @@ export class IngestionProcessor extends WorkerHost {
     }
   }
 
-  /**
-   * Generates a deterministic mock embedding vector (1536 dimensions)
-   * used during testing when external API key is not configured.
-   */
-  private generateFallbackVector(text: string, dimensions = 1536): number[] {
-    const vector: number[] = new Array(dimensions).fill(0);
-    const words = text.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(Boolean);
-    for (const word of words) {
-      let h = 0;
-      for (let i = 0; i < word.length; i++) {
-        h = (Math.imul(31, h) + word.charCodeAt(i)) | 0;
-      }
-      const idx = Math.abs(h) % dimensions;
-      vector[idx] += 1.0;
-    }
-    const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0)) || 1;
-    return vector.map((val) => Number((val / norm).toFixed(6)));
-  }
 }

@@ -130,7 +130,7 @@ const getVideoEmbedInfo = (url?: string) => {
 
   // YouTube (watch?v=, youtu.be/, embed/, shorts/)
   const ytMatch = trimmed.match(
-    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/i
+    /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i
   );
   if (ytMatch && ytMatch[1]) {
     return {
@@ -186,21 +186,12 @@ export const LearningCanvas: React.FC<LearningCanvasProps> = ({
   onAddNoteFromHighlight,
   onMarkComplete,
 }) => {
-  const [viewMode, setViewMode] = useState<'reading' | 'video'>(
-    lesson?.type === 'video' || (lesson?.videoUrl && !lesson?.contentMarkdown) ? 'video' : 'reading'
-  );
+  const [selectedView, setSelectedView] = useState<{ lessonKey: string; mode: 'reading' | 'video' } | null>(null);
+  const lessonKey = `${lesson?.id}:${lesson?.type}`;
+  const viewMode = selectedView?.lessonKey === lessonKey ? selectedView.mode
+    : lesson?.type === 'video' || (lesson?.videoUrl && !lesson?.contentMarkdown) ? 'video' : 'reading';
+  const setViewMode = (mode: 'reading' | 'video') => setSelectedView({ lessonKey, mode });
   const [bottomTab, setBottomTab] = useState<'SUMMARY' | 'RESOURCES' | 'DISCUSSION'>('SUMMARY');
-
-  // Auto-switch viewMode when a new lesson is selected
-  useEffect(() => {
-    if (lesson) {
-      if (lesson.type === 'video' || (lesson.videoUrl && !lesson.contentMarkdown)) {
-        setViewMode('video');
-      } else {
-        setViewMode('reading');
-      }
-    }
-  }, [lesson?.id, lesson?.type]);
 
   const videoEmbed = getVideoEmbedInfo(lesson?.videoUrl);
   
@@ -218,7 +209,7 @@ export const LearningCanvas: React.FC<LearningCanvasProps> = ({
     }
   }, [lesson?.id]);
 
-  const loadDiscussions = async (lessonId: string) => {
+  async function loadDiscussions(lessonId: string) {
     setIsLoadingDiscussions(true);
     try {
       const data = await api.getDiscussions(lessonId).catch(() => []);
@@ -226,7 +217,7 @@ export const LearningCanvas: React.FC<LearningCanvasProps> = ({
     } finally {
       setIsLoadingDiscussions(false);
     }
-  };
+  }
 
   const handlePostDiscussion = async (e: React.FormEvent) => {
     e.preventDefault();

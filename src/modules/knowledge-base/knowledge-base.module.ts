@@ -1,3 +1,4 @@
+import { AiModule } from '../ai/ai.module';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { KnowledgeBaseService } from './knowledge-base.service';
@@ -6,6 +7,7 @@ import { IngestionProcessor } from '../../jobs/ingestion.processor';
 
 @Module({
   imports: [
+    AiModule,
     BullModule.registerQueue({
       name: 'document-ingestion',
     }),

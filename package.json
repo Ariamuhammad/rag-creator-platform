@@ -8,15 +8,17 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\"",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start": "nest start --exec bun",
+    "start:dev": "nest start --watch --exec bun",
+    "start:debug": "nest start --debug --watch --exec bun",
+    "start:prod": "bun dist/main.js",
     "prisma:emit": "prisma contract emit",
     "prisma:update": "prisma db update",
     "prisma:plan": "prisma migration plan",
     "prisma:migrate": "prisma db migrate",
-    "seed": "bun run scripts/seed-platform.ts"
+    "seed": "bun run scripts/seed-platform.ts",
+    "test:ai": "bun test tests",
+    "verify:server-ai": "bun run scripts/verify-server-ai.ts"
   },
   "dependencies": {
     "@langchain/core": "^0.3.43",
@@ -29,7 +31,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.11",
     "@nestjs/swagger": "^11.0.6",
-    "@prisma/orm-postgres": "^8.0.0-rc.11",
+    "@prisma/orm-postgres": "8.0.0-rc.11",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.41.6",
     "class-transformer": "^0.5.1",
@@ -41,6 +43,7 @@
     "redis": "^4.7.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "temporal-polyfill": "1.0.4",
     "xendit-node": "^7.0.0"
   },
   "devDependencies": {

@@ -21,6 +21,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { BrowserAiStatus } from '../BrowserAiStatus';
 
 interface LessonDraft {
   title: string;
@@ -70,6 +71,8 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
   const [instructions, setInstructions] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  React.useEffect(() => () => requestRef.current?.abort(), []);
 
   // Generated draft
   const [draft, setDraft] = useState<CourseDraft | null>(null);
@@ -123,6 +126,7 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
 
   // Submit PDF to AI Generator
   const handleGenerate = async () => {
+    if (requestRef.current) return;
     if (!file) {
       setErrorMessage('Silakan pilih dokumen PDF terlebih dahulu.');
       return;
@@ -130,6 +134,8 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
 
     setErrorMessage(null);
     setStep('GENERATING');
+    const controller = new AbortController();
+    requestRef.current = controller;
 
     try {
       const formData = new FormData();
@@ -141,7 +147,7 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
         formData.append('targetLevel', targetLevel);
       }
 
-      const res = await api.generateSyllabusFromPdf(formData);
+      const res = await api.generateSyllabusFromPdf(formData, controller.signal);
       if (res && res.courseDraft) {
         setDraft(res.courseDraft);
         setActiveModuleIdx(0);
@@ -151,9 +157,12 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
         throw new Error('Gagal memproses struktur silabus dari dokumen ini.');
       }
     } catch (err: any) {
+      if (err.name === 'AbortError') { setStep('UPLOAD'); return; }
       console.error('Error generating syllabus:', err);
       setErrorMessage(err.message || 'Terjadi kesalahan saat memproses dokumen PDF dengan AI.');
       setStep('UPLOAD');
+    } finally {
+      if (requestRef.current === controller) requestRef.current = null;
     }
   };
 
@@ -190,6 +199,7 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
     try {
       // Map modules and lessons to DTO
       const payload = {
+        isPublished: false,
         title: draft.title,
         slug: draft.slug,
         description: draft.description,
@@ -266,7 +276,8 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { requestRef.current?.abort(); onClose(); }}
+            aria-label="Tutup dialog silabus"
             className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded-lg hover:bg-zinc-800 transition"
           >
             <X className="w-5 h-5" />
@@ -396,6 +407,7 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
         {/* STEP 2: GENERATING SCREEN */}
         {step === 'GENERATING' && (
           <div className="p-16 flex flex-col items-center justify-center text-center space-y-6">
+              <button type="button" onClick={() => requestRef.current?.abort()} className="underline text-zinc-300">Batalkan proses</button>
             <div className="relative">
               <div className="w-20 h-20 rounded-full border-4 border-amber-500/20 border-t-amber-500 animate-spin" />
               <div className="absolute inset-0 flex items-center justify-center text-amber-400">
@@ -412,10 +424,11 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
               </p>
             </div>
 
+            <BrowserAiStatus />
             <div className="w-full max-w-sm p-4 rounded-xl bg-zinc-900 border border-zinc-800 space-y-2.5 text-xs text-zinc-400 font-mono text-left">
               <div className="flex items-center gap-2 text-emerald-400">
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Ekstraksi teks PDF selesai</span>
+                <span>Memproses dokumen PDF</span>
               </div>
               <div className="flex items-center gap-2 text-amber-400">
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -485,7 +498,7 @@ export const PdfToSyllabusModal: React.FC<PdfToSyllabusModalProps> = ({
                     <Save className="w-3.5 h-3.5" />
                   )}
                   <span>
-                    {directSaveSuccess ? 'Tersimpan!' : 'Simpan &amp; Publikasikan'}
+                    {directSaveSuccess ? 'Draf tersimpan!' : 'Simpan draf untuk ditinjau'}
                   </span>
                 </button>
               </div>

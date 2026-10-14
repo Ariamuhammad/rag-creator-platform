@@ -5,6 +5,7 @@ import {
   Body,
   Param,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -13,7 +14,12 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
-import { QueryChatDto } from './dto/query-chat.dto';
+import {
+  CompleteChatDto,
+  PreparedChatDto,
+  QueryChatDto,
+} from './dto/query-chat.dto';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantAccessGuard } from '../../common/guards/tenant-access.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -29,11 +35,12 @@ export class ChatController {
   @UseGuards(TenantAccessGuard)
   @ApiOperation({
     summary:
-      'Send a query to the Creator RAG Copilot (Enforces Tenant Isolation & Credit Ledger)',
+      'Prepare browser RAG context, or generate an answer when server inference is explicitly enabled',
   })
   @ApiResponse({
     status: 200,
-    description: 'Answer returned with context sources and token usage ledger.',
+    description:
+      'Browser mode returns messages and requestMessageId for /chat/complete; server mode returns the generated answer.',
   })
   @ApiResponse({
     status: 403,
@@ -44,6 +51,36 @@ export class ChatController {
     @Body() dto: QueryChatDto,
   ) {
     return this.chatService.handleChatQuery(studentId, dto);
+  }
+
+  @Post('complete')
+  @ApiOperation({
+    summary: 'Save a browser-generated answer for an authorized prepared query',
+  })
+  complete(@CurrentUser('id') studentId: string, @Body() dto: CompleteChatDto) {
+    return this.chatService.completeBrowserQuery(studentId, dto);
+  }
+
+  @Post('server-fallback')
+  async fallback(
+    @CurrentUser('id') studentId: string,
+    @Body() dto: PreparedChatDto,
+    @Req() req: Request,
+  ) {
+    const controller = new AbortController();
+    const cancel = () => {
+      if (!req.res?.writableEnded) controller.abort();
+    };
+    req.res?.on('close', cancel);
+    try {
+      return await this.chatService.fallbackBrowserQuery(
+        studentId,
+        dto.requestMessageId,
+        controller.signal,
+      );
+    } finally {
+      req.res?.off('close', cancel);
+    }
   }
 
   @Get('sessions/:creatorProfileId')

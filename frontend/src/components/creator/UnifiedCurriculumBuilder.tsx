@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { BrowserAiStatus } from '../BrowserAiStatus';
 import {
   ArrowLeft,
   Save,
@@ -58,6 +59,8 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
   const [slug, setSlug] = useState(initialCourse?.slug || '');
   const [description, setDescription] = useState(initialCourse?.description || '');
   const [level, setLevel] = useState(initialCourse?.level || 'INTERMEDIATE');
+  const [isPublished, setIsPublished] = useState(initialCourse?.isPublished === true);
+  const [reviewed, setReviewed] = useState(false);
 
   // Assigned RAG Documents (Exclusive to this course)
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>(() => {
@@ -123,6 +126,8 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
 
   const handleApplyPdfDraft = (draft: any) => {
+    setIsPublished(false);
+    setReviewed(false);
     if (draft.title) setTitle(draft.title);
     if (draft.slug) setSlug(draft.slug);
     if (draft.description) setDescription(draft.description);
@@ -171,6 +176,8 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
   // Local document list supporting direct on-the-fly uploads inside builder
   const [docList, setDocList] = useState<DocumentItem[]>(availableDocuments);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const uploadRef = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => uploadRef.current?.abort(), []);
   const [docUploadError, setDocUploadError] = useState<string | null>(null);
 
   const toggleDocumentAssignment = (docId: string) => {
@@ -184,6 +191,7 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
     if (!file) return;
 
     setIsUploadingDoc(true);
+    const controller = new AbortController(); uploadRef.current = controller;
     setDocUploadError(null);
 
     try {
@@ -191,7 +199,7 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
       formData.append('file', file);
       formData.append('title', file.name);
 
-      const res = await api.uploadDocument(formData);
+      const { document: res } = await api.uploadDocument(formData, controller.signal);
       const newDoc: DocumentItem = {
         id: res.id || `doc_${Date.now()}`,
         creatorProfileId: res.creatorProfileId || '',
@@ -206,8 +214,9 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
       setDocList((prev) => [newDoc, ...prev]);
       setSelectedDocIds((prev) => [...prev, newDoc.id]);
     } catch (err: any) {
-      setDocUploadError(err.message || 'Gagal mengunggah dokumen materi.');
+      if (err.name !== 'AbortError') setDocUploadError(err.message || 'Gagal mengunggah dokumen materi.');
     } finally {
+      uploadRef.current = null;
       setIsUploadingDoc(false);
     }
   };
@@ -303,12 +312,15 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
       setErrorMessage('Judul dan slug kursus wajib diisi.');
       return;
     }
+    if (isPublished && !reviewed) { setErrorMessage('Tinjau materi dan centang pernyataan sebelum menerbitkan.'); return; }
 
     setIsSaving(true);
     setErrorMessage(null);
 
     try {
       const payload = {
+        isPublished,
+        reviewed,
         title,
         slug: slug.toLowerCase().trim(),
         description,
@@ -380,6 +392,14 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
         </div>
 
         <div className="flex items-center gap-2.5">
+          <label className="text-xs text-zinc-300 flex items-center gap-2">
+            <input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
+            Materi sudah saya tinjau
+          </label>
+          <label className="text-xs text-zinc-300 flex items-center gap-2">
+            <input type="checkbox" checked={isPublished} onChange={e => setIsPublished(e.target.checked)} />
+            Terbitkan untuk siswa
+          </label>
           <button
             type="button"
             onClick={() => setIsPdfModalOpen(true)}
@@ -427,6 +447,7 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
           <span>{errorMessage}</span>
         </div>
       )}
+      {isUploadingDoc && <button type="button" className="text-xs underline text-zinc-300" onClick={() => uploadRef.current?.abort()}>Batalkan indeks dokumen</button>}
 
       {/* 2. Grid Layout: Course Metadata & RAG Knowledge Assignment */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -526,7 +547,7 @@ export const UnifiedCurriculumBuilder: React.FC<UnifiedCurriculumBuilderProps> =
                   className="hidden"
                 />
               </label>
-
+              <BrowserAiStatus />
               {docUploadError && (
                 <div className="text-[10px] text-red-400 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3 shrink-0" />

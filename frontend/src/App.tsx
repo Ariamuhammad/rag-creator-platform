@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ShieldAlert } from 'lucide-react';
+import { Loader2, ShieldAlert } from 'lucide-react';
 import { Header, type AppViewMode } from './components/Header';
 import { ClassroomWorkspace } from './components/classroom/ClassroomWorkspace';
 import { MasterSyllabusView } from './components/student/MasterSyllabusView';
@@ -13,6 +13,8 @@ import { api } from './services/api';
 import type { SubscriptionTier, DocumentItem, PaymentOrder, PayoutRequest } from './types';
 
 export function App() {
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [bootstrapError, setBootstrapError] = useState('');
   const [currentView, setCurrentView] = useState<AppViewMode>('CLASSROOM');
   const [userName, setUserName] = useState('Alice (Student)');
   const [userRole, setUserRole] = useState<'STUDENT' | 'CREATOR'>('STUDENT');
@@ -48,22 +50,25 @@ export function App() {
     loginAndBootstrap('Alice (Student)');
   }, []);
 
-  const loginAndBootstrap = async (userTitle: string) => {
+  async function loginAndBootstrap(userTitle: string) {
+    setIsBootstrapping(true);
+    setBootstrapError('');
     try {
       const isCreator = userTitle.includes('Educator') || userTitle.includes('Bob');
       const role: 'STUDENT' | 'CREATOR' = isCreator ? 'CREATOR' : 'STUDENT';
       setUserRole(role);
       const email = isCreator ? 'creator@edurag.com' : 'student@edurag.com';
-      await api.login(email, 'password123').catch((err) => {
-        console.warn('Auto-login notice:', err.message);
-      });
-      await bootstrapPlatform();
+      await api.login(email, 'password123');
+      await bootstrapPlatform(role);
     } catch (err) {
       console.warn('Bootstrapping error:', err);
+      setBootstrapError('Gagal memuat akun. Periksa koneksi aplikasi dan coba kembali.');
+    } finally {
+      setIsBootstrapping(false);
     }
-  };
+  }
 
-  const bootstrapPlatform = async () => {
+  async function bootstrapPlatform(role = userRole) {
     try {
       let creatorProfileId = '';
       try {
@@ -80,7 +85,7 @@ export function App() {
         const tiersData = await api.getCreatorTiers(creatorProfileId).catch(() => []);
         setTiers(tiersData);
 
-        const balanceData = await api.getStudentBalance(creatorProfileId).catch(() => null);
+        const balanceData = role === 'STUDENT' ? await api.getStudentBalance(creatorProfileId).catch(() => null) : null;
         if (balanceData) {
           setHasSubscription(balanceData.hasActiveSubscription);
           setStudentCredits(balanceData.remainingCredits);
@@ -92,13 +97,13 @@ export function App() {
         setTiers([]);
       }
 
-      const docs = await api.getDocuments().catch(() => []);
+      const docs = role === 'CREATOR' ? await api.getDocuments().catch(() => []) : [];
       setDocuments(docs);
 
-      const studentOrders = await api.getStudentOrders().catch(() => []);
+      const studentOrders = role === 'STUDENT' ? await api.getStudentOrders().catch(() => []) : [];
       setOrders(studentOrders);
 
-      const walletData = await api.getCreatorWallet().catch(() => null);
+      const walletData = role === 'CREATOR' ? await api.getCreatorWallet().catch(() => null) : null;
       if (walletData) {
         setCreatorWallet(walletData.walletBalance);
         if (walletData.bankAccount) {
@@ -106,12 +111,12 @@ export function App() {
         }
       }
 
-      const payoutData = await api.getCreatorPayouts().catch(() => []);
+      const payoutData = role === 'CREATOR' ? await api.getCreatorPayouts().catch(() => []) : [];
       setPayouts(payoutData);
     } catch (e) {
       console.warn('Bootstrap fetch warning:', e);
     }
-  };
+  }
 
   const handleSubscribeClick = async (tier: SubscriptionTier) => {
     try {
@@ -158,6 +163,23 @@ export function App() {
     }
   };
 
+  if (isBootstrapping) {
+    return (
+      <div role="status" className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center gap-3">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        Memuat akun dan kursus...
+      </div>
+    );
+  }
+  if (bootstrapError) {
+    return (
+      <div role="alert" className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center gap-3">
+        {bootstrapError}
+        <button type="button" className="underline" onClick={() => loginAndBootstrap(userName)}>Coba kembali</button>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-indigo-500/20 selection:text-indigo-200">
       {/* Top Application Header */}
@@ -187,9 +209,11 @@ export function App() {
 
         {currentView === 'CLASSROOM' && (
           <ClassroomWorkspace
+            key={activeCourseSlug}
             creatorProfileId={creatorProfile?.id || ''}
             courseSlug={activeCourseSlug}
             remainingCredits={studentCredits}
+            onCreditsChange={setStudentCredits}
           />
         )}
 

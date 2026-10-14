@@ -53,12 +53,8 @@ export const MasterSyllabusView: React.FC<MasterSyllabusViewProps> = ({
 
   const [discussions, setDiscussions] = useState<any[]>([]);
 
-  useEffect(() => {
-    fetchEnrolledData();
-  }, []);
 
-  const fetchEnrolledData = async () => {
-    setIsLoading(true);
+  async function fetchEnrolledData() {
     try {
       const res = await api.getEnrolledCourses().catch(() => []);
       setEnrolledCourses(Array.isArray(res) ? res : []);
@@ -78,7 +74,11 @@ export const MasterSyllabusView: React.FC<MasterSyllabusViewProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    fetchEnrolledData();
+  }, []);
 
   const totalCompleted = enrolledCourses.reduce((acc, c) => acc + c.curriculumProgress.completedCount, 0);
   const totalLessons = enrolledCourses.reduce((acc, c) => acc + c.curriculumProgress.totalLessons, 0);

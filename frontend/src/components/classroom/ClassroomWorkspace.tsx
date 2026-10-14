@@ -11,6 +11,7 @@ interface ClassroomWorkspaceProps {
   courseId?: string;
   courseSlug?: string;
   remainingCredits: number;
+  onCreditsChange: (remaining: number) => void;
 }
 
 export const ClassroomWorkspace: React.FC<ClassroomWorkspaceProps> = ({
@@ -18,6 +19,7 @@ export const ClassroomWorkspace: React.FC<ClassroomWorkspaceProps> = ({
   courseId,
   courseSlug = 'enterprise-rag-systems',
   remainingCredits,
+  onCreditsChange,
 }) => {
   // Course State (Clean Database-Driven State)
   const [modules, setModules] = useState<CourseModule[]>([]);
@@ -33,69 +35,74 @@ export const ClassroomWorkspace: React.FC<ClassroomWorkspaceProps> = ({
   const [notes, setNotes] = useState<PersonalNote[]>([]);
 
   useEffect(() => {
+    async function loadRealNotes() {
+      try {
+        const realNotes = await api.getNotes().catch(() => []);
+        if (Array.isArray(realNotes)) {
+          const mappedNotes: PersonalNote[] = realNotes.map((n: any) => ({
+            id: n.id,
+            lessonId: n.lessonId,
+            lessonTitle: n.lesson?.title || 'Materi Kursus',
+            selectedText: n.selectedText || '',
+            noteText: n.noteText,
+            timestamp: n.createdAt
+              ? new Date(n.createdAt).toLocaleDateString('id-ID', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              : 'Baru saja',
+          }));
+          setNotes(mappedNotes);
+        }
+      } catch (e) {
+        console.warn('Failed loading notes from DB:', e);
+      }
+    }
+    async function loadCourseData(slug: string) {
+      try {
+        const res = await api.getCourseBySlug(slug).catch(() => null);
+        if (res) {
+          if (res.title) setCourseTitle(res.title);
+          if (res.id) setActiveCourseId(res.id);
+
+          if (res.modules && res.modules.length > 0) {
+            setModules(res.modules);
+            // Auto-select first incomplete lesson, or first lesson
+            const flat = res.modules.flatMap((m: any) => m.lessons || []);
+            const firstIncomplete = flat.find((l: any) => !l.completed);
+            const targetLesson = firstIncomplete || flat[0] || null;
+            if (targetLesson) {
+              setActiveLesson(targetLesson);
+            }
+          }
+
+          if (res.documents && res.documents.length > 0) {
+            const mappedDocs: KnowledgeSource[] = res.documents.map(
+              (d: any) => ({
+                id: d.id,
+                title: d.title,
+                type: d.fileType?.toLowerCase() === 'pdf' ? 'pdf' : 'doc',
+                chunkCount: d.chunkCount || 20,
+                fileSize: `${((d.fileSize || 1024) / 1024).toFixed(0)} KB`,
+                status: 'indexed',
+                relevanceTag: 'Dokumen Kursus Terisolasi',
+              }),
+            );
+            setKnowledgeSources(mappedDocs);
+          }
+        }
+      } catch (error) {
+        console.warn('Failed loading course data in classroom:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
     if (courseSlug) {
       loadCourseData(courseSlug);
     }
     loadRealNotes();
   }, [courseSlug]);
-
-  const loadRealNotes = async () => {
-    try {
-      const realNotes = await api.getNotes().catch(() => []);
-      if (Array.isArray(realNotes)) {
-        const mappedNotes: PersonalNote[] = realNotes.map((n: any) => ({
-          id: n.id,
-          lessonId: n.lessonId,
-          lessonTitle: n.lesson?.title || 'Materi Kursus',
-          selectedText: n.selectedText || '',
-          noteText: n.noteText,
-          timestamp: n.createdAt ? new Date(n.createdAt).toLocaleDateString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'Baru saja',
-        }));
-        setNotes(mappedNotes);
-      }
-    } catch (e) {
-      console.warn('Failed loading notes from DB:', e);
-    }
-  };
-
-  const loadCourseData = async (slug: string) => {
-    setIsLoading(true);
-    try {
-      const res = await api.getCourseBySlug(slug).catch(() => null);
-      if (res) {
-        if (res.title) setCourseTitle(res.title);
-        if (res.id) setActiveCourseId(res.id);
-
-        if (res.modules && res.modules.length > 0) {
-          setModules(res.modules);
-          // Auto-select first incomplete lesson, or first lesson
-          const flat = res.modules.flatMap((m: any) => m.lessons || []);
-          const firstIncomplete = flat.find((l: any) => !l.completed);
-          const targetLesson = firstIncomplete || flat[0] || null;
-          if (targetLesson) {
-            setActiveLesson(targetLesson);
-          }
-        }
-
-        if (res.documents && res.documents.length > 0) {
-          const mappedDocs: KnowledgeSource[] = res.documents.map((d: any) => ({
-            id: d.id,
-            title: d.title,
-            type: d.fileType?.toLowerCase() === 'pdf' ? 'pdf' : 'doc',
-            chunkCount: d.chunkCount || 20,
-            fileSize: `${((d.fileSize || 1024) / 1024).toFixed(0)} KB`,
-            status: 'indexed',
-            relevanceTag: 'Dokumen Kursus Terisolasi',
-          }));
-          setKnowledgeSources(mappedDocs);
-        }
-      }
-    } catch (e) {
-      console.warn('Failed loading course data in classroom:', e);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   // Tri-Pane Layout State
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
@@ -301,6 +308,7 @@ export const ClassroomWorkspace: React.FC<ClassroomWorkspaceProps> = ({
             onAddNote={handleAddNote}
             onDeleteNote={handleDeleteNote}
             remainingCredits={remainingCredits}
+            onCreditsChange={onCreditsChange}
             initialContextQuery={highlightContextForAI}
             onClearInitialContextQuery={() => setHighlightContextForAI(undefined)}
           />

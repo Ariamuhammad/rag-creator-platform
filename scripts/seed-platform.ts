@@ -1,7 +1,18 @@
-const API_BASE = 'http://localhost:3000/api/v1';
+const API_BASE = `http://localhost:${process.env.PORT || 3000}/api/v1`;
+
+async function checkedFetch(url: string, options?: RequestInit) {
+  const response = await fetch(url, options);
+  if (!response.ok)
+    throw new Error(
+      `Seed request failed (HTTP ${response.status}): ${url}: ${await response.text()}`,
+    );
+  return response;
+}
 
 async function seed() {
-  console.log('🌱 Starting Comprehensive Platform Seeder for EduRAG (PostgreSQL)...\n');
+  console.log(
+    '🌱 Starting Comprehensive Platform Seeder for EduRAG (PostgreSQL)...\n',
+  );
 
   // 1. Authenticate or Register Creator (Bob)
   let creatorToken = '';
@@ -12,7 +23,10 @@ async function seed() {
     const loginRes = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'creator@edurag.com', password: 'password123' }),
+      body: JSON.stringify({
+        email: 'creator@edurag.com',
+        password: 'password123',
+      }),
     });
 
     if (loginRes.ok) {
@@ -22,7 +36,7 @@ async function seed() {
       creatorProfile = data.user.creatorProfile;
       console.log('1. ✅ Creator (Bob) Authenticated:', creatorUser.email);
     } else {
-      const regRes = await fetch(`${API_BASE}/auth/register`, {
+      const regRes = await checkedFetch(`${API_BASE}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -50,7 +64,7 @@ async function seed() {
   };
 
   // 2. Configure Creator Bank Account
-  await fetch(`${API_BASE}/billing/creator/bank-account`, {
+  await checkedFetch(`${API_BASE}/billing/creator/bank-account`, {
     method: 'PATCH',
     headers: creatorHeaders,
     body: JSON.stringify({
@@ -62,20 +76,23 @@ async function seed() {
   console.log('2. ✅ Bank account configured for Bob');
 
   // 3. Ensure Subscription Tiers for Bob
-  const tiersRes = await fetch(`${API_BASE}/creators/${creatorProfile.id}/tiers`);
+  const tiersRes = await checkedFetch(
+    `${API_BASE}/creators/${creatorProfile.id}/tiers`,
+  );
   let tiers = await tiersRes.json();
   if (!Array.isArray(tiers) || tiers.length === 0) {
-    await fetch(`${API_BASE}/creators/tiers`, {
+    await checkedFetch(`${API_BASE}/creators/tiers`, {
       method: 'POST',
       headers: creatorHeaders,
       body: JSON.stringify({
         name: 'Masterclass AI & Vector Tier',
-        description: 'Akses penuh modul enterprise, AI Copilot, dan 250.000 kredit token',
+        description:
+          'Akses penuh modul enterprise, AI Copilot, dan 250.000 kredit token',
         price: 200000,
         monthlyCreditQuota: 250000,
       }),
     });
-    await fetch(`${API_BASE}/creators/tiers`, {
+    await checkedFetch(`${API_BASE}/creators/tiers`, {
       method: 'POST',
       headers: creatorHeaders,
       body: JSON.stringify({
@@ -85,7 +102,9 @@ async function seed() {
         monthlyCreditQuota: 50000,
       }),
     });
-    const updatedTiers = await fetch(`${API_BASE}/creators/${creatorProfile.id}/tiers`);
+    const updatedTiers = await checkedFetch(
+      `${API_BASE}/creators/${creatorProfile.id}/tiers`,
+    );
     tiers = await updatedTiers.json();
   }
   console.log(`3. ✅ Tiers verified for Bob (${tiers.length} tiers)`);
@@ -98,7 +117,10 @@ async function seed() {
     const loginRes = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'student@edurag.com', password: 'password123' }),
+      body: JSON.stringify({
+        email: 'student@edurag.com',
+        password: 'password123',
+      }),
     });
 
     if (loginRes.ok) {
@@ -107,7 +129,7 @@ async function seed() {
       studentUser = data.user;
       console.log('4. ✅ Student (Alice) Authenticated:', studentUser.email);
     } else {
-      const regRes = await fetch(`${API_BASE}/auth/register`, {
+      const regRes = await checkedFetch(`${API_BASE}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -132,21 +154,31 @@ async function seed() {
   };
 
   // 5. Ensure Student has Active Subscription and Orders
-  const studentBalanceRes = await fetch(`${API_BASE}/billing/student/balance/${creatorProfile.id}`, {
-    headers: studentHeaders,
-  });
+  const studentBalanceRes = await checkedFetch(
+    `${API_BASE}/billing/balance/${creatorProfile.id}`,
+    {
+      headers: studentHeaders,
+    },
+  );
   const studentBalance = await studentBalanceRes.json();
   if (!studentBalance.hasActiveSubscription) {
     console.log('👉 Creating real subscription & invoice order for Alice...');
-    const masterTier = tiers.find((t: any) => t.name.includes('Masterclass')) || tiers[0];
-    const invoiceRes = await fetch(`${API_BASE}/billing/create-invoice`, {
-      method: 'POST',
-      headers: studentHeaders,
-      body: JSON.stringify({ creatorProfileId: creatorProfile.id, tierId: masterTier.id }),
-    });
+    const masterTier =
+      tiers.find((t: any) => t.name.includes('Masterclass')) || tiers[0];
+    const invoiceRes = await checkedFetch(
+      `${API_BASE}/billing/create-invoice`,
+      {
+        method: 'POST',
+        headers: studentHeaders,
+        body: JSON.stringify({
+          creatorProfileId: creatorProfile.id,
+          tierId: masterTier.id,
+        }),
+      },
+    );
     const invoice = await invoiceRes.json();
     // Simulate webhook paid
-    await fetch(`${API_BASE}/billing/xendit-webhook`, {
+    await checkedFetch(`${API_BASE}/billing/xendit-webhook`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -162,7 +194,9 @@ async function seed() {
     });
     console.log('5. ✅ Subscription & Paid Order created for Alice');
   } else {
-    console.log(`5. ✅ Alice already has active subscription (${studentBalance.remainingCredits} tokens)`);
+    console.log(
+      `5. ✅ Alice already has active subscription (${studentBalance.remainingCredits} tokens)`,
+    );
   }
 
   // 6. Ensure Course Syllabus has full 4 modules and lessons
@@ -170,27 +204,72 @@ async function seed() {
   let courseRes = await fetch(`${API_BASE}/courses/slug/${courseSlug}`, {
     headers: studentHeaders,
   });
+  if (courseRes.status === 404) {
+    courseRes = await checkedFetch(`${API_BASE}/courses/full`, {
+      method: 'POST',
+      headers: creatorHeaders,
+      body: JSON.stringify({
+        title: 'Enterprise RAG Systems',
+        isPublished: true,
+        reviewed: true,
+        slug: courseSlug,
+        level: 'INTERMEDIATE',
+        modules: [
+          {
+            title: 'Modul 1: Fondasi RAG',
+            lessons: [
+              {
+                title: 'Retrieval-Augmented Generation',
+                type: 'reading',
+                contentMarkdown:
+                  'RAG mengambil konteks dari materi sebelum model menghasilkan jawaban. Embedding mengubah teks menjadi vektor untuk pencarian semantik.',
+              },
+            ],
+          },
+          {
+            title: 'Modul 2: Pencarian Vektor',
+            lessons: [
+              {
+                title: 'Cosine Similarity dan pgvector',
+                type: 'reading',
+                contentMarkdown:
+                  'Cosine similarity mengukur kemiripan arah vektor. PostgreSQL pgvector menyimpan vektor; pencarian perlu membatasi kreator dan kursus.',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  }
+  if (!courseRes.ok)
+    throw new Error(`Course setup failed (HTTP ${courseRes.status}).`);
   let course = await courseRes.json();
   const existingModules = course.modules || [];
 
-  console.log(`6. 🔍 Checking Course "${course.title}" (${existingModules.length} existing modules)...`);
+  console.log(
+    `6. 🔍 Checking Course "${course.title}" (${existingModules.length} existing modules)...`,
+  );
 
   // If Module 3 does not exist, add it
   const hasMod3 = existingModules.some((m: any) => m.title.includes('Modul 3'));
   if (!hasMod3) {
     console.log('👉 Adding Modul 3: Document Ingestion & Chunking...');
-    const mod3Res = await fetch(`${API_BASE}/courses/${course.id}/modules`, {
-      method: 'POST',
-      headers: creatorHeaders,
-      body: JSON.stringify({
-        title: 'Modul 3: Document Ingestion & Chunking Strategies',
-        description: 'Teknik segmentasi dokumen PDF, deduplikasi, dan metadata enrichment skala enterprise.',
-        orderIndex: 2,
-      }),
-    });
+    const mod3Res = await checkedFetch(
+      `${API_BASE}/courses/${course.id}/modules`,
+      {
+        method: 'POST',
+        headers: creatorHeaders,
+        body: JSON.stringify({
+          title: 'Modul 3: Document Ingestion & Chunking Strategies',
+          description:
+            'Teknik segmentasi dokumen PDF, deduplikasi, dan metadata enrichment skala enterprise.',
+          orderIndex: 2,
+        }),
+      },
+    );
     const mod3 = await mod3Res.json();
     if (mod3.id) {
-      await fetch(`${API_BASE}/courses/modules/${mod3.id}/lessons`, {
+      await checkedFetch(`${API_BASE}/courses/modules/${mod3.id}/lessons`, {
         method: 'POST',
         headers: creatorHeaders,
         body: JSON.stringify({
@@ -226,7 +305,7 @@ function chunkText(text: string, chunkSize: number = 800, overlap: number = 100)
         }),
       });
 
-      await fetch(`${API_BASE}/courses/modules/${mod3.id}/lessons`, {
+      await checkedFetch(`${API_BASE}/courses/modules/${mod3.id}/lessons`, {
         method: 'POST',
         headers: creatorHeaders,
         body: JSON.stringify({
@@ -257,18 +336,22 @@ Memproses ratusan dokumen PDF ribuan halaman secara sinkron di thread utama HTTP
   const hasMod4 = existingModules.some((m: any) => m.title.includes('Modul 4'));
   if (!hasMod4) {
     console.log('👉 Adding Modul 4: Monetisasi & Pembagian Hasil...');
-    const mod4Res = await fetch(`${API_BASE}/courses/${course.id}/modules`, {
-      method: 'POST',
-      headers: creatorHeaders,
-      body: JSON.stringify({
-        title: 'Modul 4: Monetisasi & Kuota Token Edukator',
-        description: 'Implementasi Ledger Transaksi, Prisma 8, dan Pembagian Hasil Xendit 80/20.',
-        orderIndex: 3,
-      }),
-    });
+    const mod4Res = await checkedFetch(
+      `${API_BASE}/courses/${course.id}/modules`,
+      {
+        method: 'POST',
+        headers: creatorHeaders,
+        body: JSON.stringify({
+          title: 'Modul 4: Monetisasi & Kuota Token Edukator',
+          description:
+            'Implementasi Ledger Transaksi, Prisma 8, dan Pembagian Hasil Xendit 80/20.',
+          orderIndex: 3,
+        }),
+      },
+    );
     const mod4 = await mod4Res.json();
     if (mod4.id) {
-      await fetch(`${API_BASE}/courses/modules/${mod4.id}/lessons`, {
+      await checkedFetch(`${API_BASE}/courses/modules/${mod4.id}/lessons`, {
         method: 'POST',
         headers: creatorHeaders,
         body: JSON.stringify({
@@ -308,100 +391,129 @@ Setiap transaksi kemudian dicatat permanen di tabel \`credit_ledgers\` untuk aud
   }
 
   // Refresh course details
-  courseRes = await fetch(`${API_BASE}/courses/slug/${courseSlug}`, {
+  courseRes = await checkedFetch(`${API_BASE}/courses/slug/${courseSlug}`, {
     headers: studentHeaders,
   });
   course = await courseRes.json();
-  const allCurrentLessons = (course.modules || []).flatMap((m: any) => m.lessons);
+  const allCurrentLessons = (course.modules || []).flatMap(
+    (m: any) => m.lessons,
+  );
 
   // 7. Attach Real Documents to Course
-  const docsRes = await fetch(`${API_BASE}/knowledge-base/documents`, {
+  const docsRes = await checkedFetch(`${API_BASE}/knowledge-base/documents`, {
     headers: creatorHeaders,
   });
   const allDocs = await docsRes.json();
   if (Array.isArray(allDocs) && allDocs.length > 0) {
     const docIds = allDocs.map((d: any) => d.id);
-    await fetch(`${API_BASE}/knowledge-base/courses/${course.id}/assign-documents`, {
-      method: 'POST',
-      headers: creatorHeaders,
-      body: JSON.stringify({ documentIds: docIds }),
-    });
-    console.log(`7. ✅ Assigned ${docIds.length} real document(s) to course "${course.title}"`);
+    await checkedFetch(
+      `${API_BASE}/knowledge-base/courses/${course.id}/assign-documents`,
+      {
+        method: 'POST',
+        headers: creatorHeaders,
+        body: JSON.stringify({ documentIds: docIds }),
+      },
+    );
+    console.log(
+      `7. ✅ Assigned ${docIds.length} real document(s) to course "${course.title}"`,
+    );
   }
 
   // 8. Seed Real Student Notes for Alice
   if (allCurrentLessons.length > 0) {
-    const existingNotesRes = await fetch(`${API_BASE}/notes`, { headers: studentHeaders });
+    const existingNotesRes = await checkedFetch(`${API_BASE}/notes`, {
+      headers: studentHeaders,
+    });
     const existingNotes = await existingNotesRes.json();
 
     if (!Array.isArray(existingNotes) || existingNotes.length === 0) {
       const les1 = allCurrentLessons[0];
       const les2 = allCurrentLessons[1] || allCurrentLessons[0];
 
-      await fetch(`${API_BASE}/notes`, {
+      await checkedFetch(`${API_BASE}/notes`, {
         method: 'POST',
         headers: studentHeaders,
         body: JSON.stringify({
           lessonId: les1.id,
-          selectedText: 'Hierarchical Navigable Small World (HNSW) graphs offer logarithm time complexity O(log N).',
-          noteText: 'Ingat: HNSW graf logaritmik mirip dengan konsep Skip List pada linked list bertingkat.',
+          selectedText:
+            'Hierarchical Navigable Small World (HNSW) graphs offer logarithm time complexity O(log N).',
+          noteText:
+            'Ingat: HNSW graf logaritmik mirip dengan konsep Skip List pada linked list bertingkat.',
         }),
       });
 
-      await fetch(`${API_BASE}/notes`, {
+      await checkedFetch(`${API_BASE}/notes`, {
         method: 'POST',
         headers: studentHeaders,
         body: JSON.stringify({
           lessonId: les2.id,
-          selectedText: 'Overlap Window (e.g. 50-100 token): Menjaga kesinambungan konteks antar chunk.',
-          noteText: 'Formula overlap: 10% sampai 15% dari total chunk size sudah ideal untuk OpenAI embedding.',
+          selectedText:
+            'Overlap Window (e.g. 50-100 token): Menjaga kesinambungan konteks antar chunk.',
+          noteText:
+            'Formula overlap: 10% sampai 15% dari total chunk size sudah ideal untuk OpenAI embedding.',
         }),
       });
       console.log('8. ✅ Real student notes created for Alice');
     } else {
-      console.log(`8. ✅ Alice already has ${existingNotes.length} notes in DB`);
+      console.log(
+        `8. ✅ Alice already has ${existingNotes.length} notes in DB`,
+      );
     }
   }
 
   // 9. Seed Real Lesson Discussions & Replies
   if (allCurrentLessons.length > 0) {
     const les1 = allCurrentLessons[0];
-    const discRes = await fetch(`${API_BASE}/discussions/lesson/${les1.id}`);
+    const discRes = await checkedFetch(
+      `${API_BASE}/discussions/lesson/${les1.id}`,
+    );
     const existingDiscussions = await discRes.json();
 
-    if (!Array.isArray(existingDiscussions) || existingDiscussions.length === 0) {
+    if (
+      !Array.isArray(existingDiscussions) ||
+      existingDiscussions.length === 0
+    ) {
       // Alice asks
-      const createdDiscRes = await fetch(`${API_BASE}/discussions`, {
+      const createdDiscRes = await checkedFetch(`${API_BASE}/discussions`, {
         method: 'POST',
         headers: studentHeaders,
         body: JSON.stringify({
           lessonId: les1.id,
-          content: 'Apakah parameter m=16 dan ef_construction=64 sudah cukup jika dataset dokumen edukator mencapai 50.000 halaman?',
+          content:
+            'Apakah parameter m=16 dan ef_construction=64 sudah cukup jika dataset dokumen edukator mencapai 50.000 halaman?',
         }),
       });
       const createdDisc = await createdDiscRes.json();
 
       // Bob replies
       if (createdDisc && createdDisc.id) {
-        await fetch(`${API_BASE}/discussions/${createdDisc.id}/replies`, {
-          method: 'POST',
-          headers: creatorHeaders,
-          body: JSON.stringify({
-            content: 'Untuk 50.000 halaman (~200.000 chunks), konfigurasi m=16 dan ef_construction=64 sudah memberikan rasio recall di atas 98.5%. Anda baru perlu menaikkan m=24 jika ada terminologi hukum/medis yang sangat spesifik.',
-          }),
-        });
+        await checkedFetch(
+          `${API_BASE}/discussions/${createdDisc.id}/replies`,
+          {
+            method: 'POST',
+            headers: creatorHeaders,
+            body: JSON.stringify({
+              content:
+                'Untuk 50.000 halaman (~200.000 chunks), konfigurasi m=16 dan ef_construction=64 sudah memberikan rasio recall di atas 98.5%. Anda baru perlu menaikkan m=24 jika ada terminologi hukum/medis yang sangat spesifik.',
+            }),
+          },
+        );
         console.log('9. ✅ Real discussion thread and educator reply created');
       }
     } else {
-      console.log(`9. ✅ Lesson 1 already has ${existingDiscussions.length} discussion threads`);
+      console.log(
+        `9. ✅ Lesson 1 already has ${existingDiscussions.length} discussion threads`,
+      );
     }
   }
 
   // 10. Seed Payout Request for Bob
-  const payoutsRes = await fetch(`${API_BASE}/billing/creator/payouts`, { headers: creatorHeaders });
+  const payoutsRes = await checkedFetch(`${API_BASE}/billing/creator/payouts`, {
+    headers: creatorHeaders,
+  });
   const payouts = await payoutsRes.json();
   if (!Array.isArray(payouts) || payouts.length === 0) {
-    await fetch(`${API_BASE}/billing/creator/payout-request`, {
+    await checkedFetch(`${API_BASE}/billing/creator/payout-request`, {
       method: 'POST',
       headers: creatorHeaders,
       body: JSON.stringify({
@@ -411,10 +523,24 @@ Setiap transaksi kemudian dicatat permanen di tabel \`credit_ledgers\` untuk aud
     });
     console.log('10. ✅ Real payout request created for Bob');
   } else {
-    console.log(`10. ✅ Bob already has ${payouts.length} payout requests in DB`);
+    console.log(
+      `10. ✅ Bob already has ${payouts.length} payout requests in DB`,
+    );
   }
 
-  console.log('\n🎉 ALL DATABASE SEEDING COMPLETED SUCCESSFULLY! All entities populated with real PostgreSQL records.\n');
+  if (
+    !creatorProfile?.id ||
+    !studentUser?.id ||
+    !course?.id ||
+    !Array.isArray(course.modules)
+  ) {
+    throw new Error(
+      'Seed failed to create valid creator, student, and course records.',
+    );
+  }
+  console.log(
+    '\n🎉 ALL DATABASE SEEDING COMPLETED SUCCESSFULLY! All entities populated with real PostgreSQL records.\n',
+  );
 }
 
 seed().catch((err) => {

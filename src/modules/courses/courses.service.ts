@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -14,22 +15,54 @@ import {
 } from './dto/course.dto';
 import { SubscriptionStatus } from '../../common/types/enums';
 import * as pdfParse from 'pdf-parse';
+import { AiService } from '../ai/ai.service';
+import { parseCourseDraft } from '../../common/browser-ai';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class CoursesService {
   private readonly logger = new Logger(CoursesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly ai: AiService,
+    @Optional() private readonly jwt?: JwtService,
+  ) {}
+
+  async fallbackSyllabus(userId: string, token: string, signal?: AbortSignal) {
+    let context: any;
+    try {
+      context = await this.jwt!.verifyAsync(token);
+    } catch {
+      throw new ForbiddenException(
+        'Konteks PDF tidak valid atau kedaluwarsa. Unggah kembali PDF.',
+      );
+    }
+    if (
+      context.purpose !== 'pdf-server-fallback' ||
+      context.userId !== userId ||
+      !Array.isArray(context.messages)
+    )
+      throw new ForbiddenException('Konteks PDF tidak dapat diakses.');
+    const result = await this.ai.generateFallback(context.messages, signal);
+    return { content: result.content };
+  }
 
   /**
    * Creator creates a full course with modules, lessons, and assigned RAG documents in one go!
    */
   async createFullCourse(userId: string, dto: CreateFullCourseDto) {
+    if (dto.isPublished === true && dto.reviewed !== true)
+      throw new BadRequestException(
+        'Tinjau materi sebelum menerbitkan kursus.',
+      );
     const creator = await this.prisma.creatorProfile.findUnique({
       where: { userId },
     });
     if (!creator) {
-      throw new ForbiddenException('Only registered creators can create courses.');
+      throw new ForbiddenException(
+        'Only registered creators can create courses.',
+      );
     }
 
     const normalizedSlug = dto.slug.toLowerCase().trim();
@@ -40,7 +73,9 @@ export class CoursesService {
     let course: any;
     if (existingCourse) {
       if (existingCourse.creatorProfileId !== creator.id) {
-        throw new ForbiddenException('Slug kursus ini sudah digunakan oleh edukator lain.');
+        throw new ForbiddenException(
+          'Slug kursus ini sudah digunakan oleh edukator lain.',
+        );
       }
       // Update existing course metadata
       course = await this.prisma.course.update({
@@ -50,6 +85,9 @@ export class CoursesService {
           description: dto.description || null,
           thumbnailUrl: dto.thumbnailUrl || null,
           level: dto.level || 'INTERMEDIATE',
+          ...(dto.isPublished !== undefined
+            ? { isPublished: dto.isPublished }
+            : {}),
         },
       });
     } else {
@@ -62,7 +100,7 @@ export class CoursesService {
           description: dto.description || null,
           thumbnailUrl: dto.thumbnailUrl || null,
           level: dto.level || 'INTERMEDIATE',
-          isPublished: true,
+          isPublished: dto.isPublished ?? false,
         },
       });
     }
@@ -82,7 +120,9 @@ export class CoursesService {
       }
 
       for (const docId of dto.documentIds) {
-        const doc = await this.prisma.document.findUnique({ where: { id: docId } });
+        const doc = await this.prisma.document.findUnique({
+          where: { id: docId },
+        });
         if (doc && doc.creatorProfileId === creator.id) {
           await this.prisma.document.update({
             where: { id: docId },
@@ -102,14 +142,20 @@ export class CoursesService {
           })
         : [];
 
-      const submittedModuleIds = dto.modules.map((m: any) => m.id).filter(Boolean);
+      const submittedModuleIds = dto.modules
+        .map((m: any) => m.id)
+        .filter(Boolean);
 
       // Remove deleted modules if updating
       if (existingCourse && currentModules.length > 0) {
         for (const currMod of currentModules) {
           if (!submittedModuleIds.includes(currMod.id)) {
-            await this.prisma.lesson.deleteMany({ where: { courseModuleId: currMod.id } });
-            await this.prisma.courseModule.delete({ where: { id: currMod.id } });
+            await this.prisma.lesson.deleteMany({
+              where: { courseModuleId: currMod.id },
+            });
+            await this.prisma.courseModule.delete({
+              where: { id: currMod.id },
+            });
           }
         }
       }
@@ -140,12 +186,18 @@ export class CoursesService {
 
         const createdLessons: any[] = [];
         if (m.lessons && m.lessons.length > 0) {
-          const currentLessons = (currentModules.find((cm) => cm.id === moduleRecord.id)?.lessons) || [];
-          const submittedLessonIds = m.lessons.map((l: any) => l.id).filter(Boolean);
+          const currentLessons =
+            currentModules.find((cm) => cm.id === moduleRecord.id)?.lessons ||
+            [];
+          const submittedLessonIds = m.lessons
+            .map((l: any) => l.id)
+            .filter(Boolean);
 
           for (const currLes of currentLessons) {
             if (!submittedLessonIds.includes(currLes.id)) {
-              await this.prisma.lesson.delete({ where: { id: currLes.id } }).catch(() => null);
+              await this.prisma.lesson
+                .delete({ where: { id: currLes.id } })
+                .catch(() => null);
             }
           }
 
@@ -154,7 +206,9 @@ export class CoursesService {
             let lessonRecord: any;
 
             const durationStr = l.duration
-              ? (l.duration.includes('min') ? l.duration : `${l.duration.trim()} min`)
+              ? l.duration.includes('min')
+                ? l.duration
+                : `${l.duration.trim()} min`
               : '15 min';
 
             if (l.id && currentLessons.some((cl) => cl.id === l.id)) {
@@ -212,7 +266,9 @@ export class CoursesService {
       where: { userId },
     });
     if (!creator) {
-      throw new ForbiddenException('Only registered creators can create courses.');
+      throw new ForbiddenException(
+        'Only registered creators can create courses.',
+      );
     }
 
     const course = await this.prisma.course.create({
@@ -227,7 +283,9 @@ export class CoursesService {
       },
     });
 
-    this.logger.log(`Creator ${creator.displayName} created course: ${course.title} (${course.id})`);
+    this.logger.log(
+      `Creator ${creator.displayName} created course: ${course.title} (${course.id})`,
+    );
     return course;
   }
 
@@ -318,6 +376,11 @@ export class CoursesService {
     if (!course) {
       throw new NotFoundException(`Course not found for slug: ${slug}`);
     }
+    if (
+      course.isPublished === false &&
+      course.creatorProfile?.userId !== studentId
+    )
+      throw new NotFoundException('Course draft not published.');
 
     const modules = await this.prisma.courseModule.findMany({
       where: { courseId: course.id },
@@ -385,7 +448,9 @@ export class CoursesService {
     });
 
     if (!course || course.creatorProfileId !== creator?.id) {
-      throw new ForbiddenException('You do not have permission to manage modules for this course.');
+      throw new ForbiddenException(
+        'You do not have permission to manage modules for this course.',
+      );
     }
 
     return this.prisma.courseModule.create({
@@ -401,7 +466,11 @@ export class CoursesService {
   /**
    * Creator adds a lesson to a module.
    */
-  async createLesson(userId: string, courseModuleId: string, dto: CreateLessonDto) {
+  async createLesson(
+    userId: string,
+    courseModuleId: string,
+    dto: CreateLessonDto,
+  ) {
     const creator = await this.prisma.creatorProfile.findUnique({
       where: { userId },
     });
@@ -410,8 +479,13 @@ export class CoursesService {
       include: { course: true },
     });
 
-    if (!courseModule || courseModule.course?.creatorProfileId !== creator?.id) {
-      throw new ForbiddenException('You do not have permission to add lessons to this module.');
+    if (
+      !courseModule ||
+      courseModule.course?.creatorProfileId !== creator?.id
+    ) {
+      throw new ForbiddenException(
+        'You do not have permission to add lessons to this module.',
+      );
     }
 
     return this.prisma.lesson.create({
@@ -430,7 +504,11 @@ export class CoursesService {
   /**
    * Student marks lesson complete or uncompletes.
    */
-  async updateLessonProgress(studentId: string, lessonId: string, completed: boolean) {
+  async updateLessonProgress(
+    studentId: string,
+    lessonId: string,
+    completed: boolean,
+  ) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
     });
@@ -485,7 +563,7 @@ export class CoursesService {
     for (const sub of subscriptions || []) {
       // Find courses by this creator
       const courses = await this.prisma.course.findMany({
-        where: { creatorProfileId: sub.creatorProfileId },
+        where: { creatorProfileId: sub.creatorProfileId, isPublished: true },
       });
 
       for (const course of courses || []) {
@@ -511,9 +589,16 @@ export class CoursesService {
           },
         });
 
-        const completedLessonIds = new Set((completedProgress || []).map((p: any) => p.lessonId));
-        const completedCount = allLessons.filter((l: any) => completedLessonIds.has(l.id)).length;
-        const progressPercentage = totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0;
+        const completedLessonIds = new Set(
+          (completedProgress || []).map((p: any) => p.lessonId),
+        );
+        const completedCount = allLessons.filter((l: any) =>
+          completedLessonIds.has(l.id),
+        ).length;
+        const progressPercentage =
+          totalLessons > 0
+            ? Math.round((completedCount / totalLessons) * 100)
+            : 0;
 
         enrolledList.push({
           courseId: course.id,
@@ -552,8 +637,11 @@ export class CoursesService {
     originalName: string,
     instructions?: string,
     targetLevel?: string,
+    userId?: string,
   ) {
-    this.logger.log(`Generating course syllabus from PDF: ${originalName} (${fileBuffer.length} bytes)`);
+    this.logger.log(
+      `Generating course syllabus from PDF: ${originalName} (${fileBuffer.length} bytes)`,
+    );
 
     // 1. Extract text using pdf-parse
     let rawText = '';
@@ -565,18 +653,27 @@ export class CoursesService {
       const pdfData = await parsePdf(fileBuffer);
       rawText = pdfData?.text || '';
     } catch (parseErr: any) {
-      this.logger.error(`Error parsing PDF ${originalName}: ${parseErr.message}`);
-      throw new BadRequestException('Gagal mengekstrak teks dari dokumen PDF yang diunggah. Pastikan file PDF valid.');
+      this.logger.error(
+        `Error parsing PDF ${originalName}: ${parseErr.message}`,
+      );
+      throw new BadRequestException(
+        'Gagal mengekstrak teks dari dokumen PDF yang diunggah. Pastikan file PDF valid.',
+      );
     }
 
     if (!rawText.trim()) {
-      throw new BadRequestException('Dokumen PDF kosong atau berupa file scan gambar tanpa teks yang dapat dibaca.');
+      throw new BadRequestException(
+        'Dokumen PDF kosong atau berupa file scan gambar tanpa teks yang dapat dibaca.',
+      );
     }
 
-    // 2. Intelligent Multi-Segment Text Sampling (up to 45,000 characters)
-    // Avoids sampling only intro pages by taking representative slices across the entire document
+    // shortcut: local PDF samples use 12,000 characters; use a larger model/pipeline for exhaustive coverage.
     let textSnippet = '';
-    const maxChars = 45000;
+    const maxChars = this.ai.browser
+      ? 6000
+      : this.ai.llmProvider === 'ollama'
+        ? 12000
+        : 45000;
     if (rawText.length <= maxChars) {
       textSnippet = rawText;
     } else {
@@ -588,11 +685,7 @@ export class CoursesService {
       textSnippet = `--- [BAGIAN 1: INTRODUKSI, DEFINISI & FONDASI] ---\n${head}\n\n--- [BAGIAN 2: ARSITEKTUR, ALGORITMA & KOMPONEN INTI] ---\n${mid}\n\n--- [BAGIAN 3: ADVANCED TECHNIQUES, IMPLEMENTASI & EVALUASI] ---\n${tail}`;
     }
 
-    // 3. Call Groq/OpenAI with structured output
-    const apiKey = process.env.OPENAI_API_KEY;
-    const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.groq.com/openai/v1';
-    const model = process.env.LLM_MODEL || 'openai/gpt-oss-120b';
-
+    // 3. Generate a JSON draft with the configured AI provider.
     const systemPrompt = `Anda adalah Principal Systems Architect & Kurator Pendidikan Teknikal Kelas Dunia.
 Tugas Anda adalah membaca intisari teks dokumen materi (buku, handbook, kurikulum, panduan, slide, atau modul) yang diunggah edukator, lalu merombaknya menjadi Draf Kurikulum Silabus Kursus Masterclass yang mendalam, profesional, dan BEBAS DARI AI SLOP.
 
@@ -622,6 +715,8 @@ Struktur JSON yang WAJIB dihasilkan:
     - videoPlacement: "TOP" (default).
     - videoUrl: "" (kosongkan jika belum ada video).
     - contentMarkdown: Konten materi masterclass lengkap dengan format markdown yang kaya sesuai 4 Komponen Wajib di atas.
+
+${this.ai.llmProvider === 'ollama' ? 'Batas untuk model lokal: buat tepat 2 modul dengan masing-masing 2 lessons. Batasi setiap contentMarkdown hingga sekitar 150 kata, sertakan diagram dan kode yang ringkas. Semua fakta dan contoh harus didukung dokumen.' : ''}
 
 ${instructions ? `Instruksi khusus dari Edukator:\n${instructions}\n` : ''}
 
@@ -655,50 +750,48 @@ Panjang Teks Dokumen: ${rawText.length} karakter
 Intisari Dokumen:
 ${textSnippet}`;
 
+    const messages = [
+      {
+        role: 'system' as const,
+        content: this.ai.browser
+          ? `Tulis draf kursus singkat dalam bahasa Indonesia berdasarkan dokumen saja. Gunakan Markdown dengan susunan: # Judul Kursus, ## Judul Modul, ### Judul Lesson, lalu penjelasan materi. Buat 1-2 modul, satu lesson per modul, maksimal 80 kata per lesson. Sertakan kode hanya jika ada di dokumen. Semua judul dan penjelasan wajib dalam bahasa Indonesia. Jangan keluarkan JSON. Level: ${targetLevel || 'INTERMEDIATE'}.
+${instructions ? `Instruksi edukator: ${instructions}` : ''}`
+          : systemPrompt,
+      },
+      { role: 'user' as const, content: userPrompt },
+    ];
+    if (this.ai.browser) {
+      const fallbackToken =
+        userId && this.jwt
+          ? await this.jwt.signAsync(
+              { purpose: 'pdf-server-fallback', userId, messages },
+              { expiresIn: '30m' },
+            )
+          : undefined;
+      return {
+        execution: 'browser' as const,
+        messages,
+        sourceFileName: originalName,
+        sourceText: textSnippet,
+        fallbackToken,
+      };
+    }
+
     try {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.3,
-          max_tokens: 8000,
-        }),
-      });
+      const response = await this.ai.generate(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        true,
+      );
 
-      if (!response.ok) {
-        const errorBody = await response.text();
-        this.logger.error(`LLM syllabus generation failed: ${response.status} - ${errorBody}`);
-        throw new Error(`LLM Error ${response.status}: ${errorBody}`);
-      }
-
-      const json = await response.json();
-      const content = json.choices?.[0]?.message?.content;
-      if (!content) {
-        throw new Error('LLM tidak mengembalikan respons teks.');
-      }
-
-      const parsedSyllabus = JSON.parse(content);
-
-      // Sanitize and ensure fallback values
-      if (!parsedSyllabus.title) parsedSyllabus.title = originalName.replace(/\.[^/.]+$/, '');
-      if (!parsedSyllabus.slug) {
-        parsedSyllabus.slug = parsedSyllabus.title
-          .toLowerCase()
-          .replace(/[^\w\s-]/g, '')
-          .replace(/[\s_-]+/g, '-')
-          .replace(/^-+|-+$/g, '');
-      }
-      if (!parsedSyllabus.level) parsedSyllabus.level = targetLevel || 'INTERMEDIATE';
-      if (!Array.isArray(parsedSyllabus.modules)) parsedSyllabus.modules = [];
+      const parsedSyllabus = parseCourseDraft(
+        response.content,
+        originalName,
+        targetLevel,
+      );
+      parsedSyllabus.isPublished = false;
 
       return {
         success: true,
@@ -706,8 +799,12 @@ ${textSnippet}`;
         courseDraft: parsedSyllabus,
       };
     } catch (llmErr: any) {
-      this.logger.error(`Failed to generate course syllabus: ${llmErr.message}`);
-      throw new BadRequestException(`Gagal menghasilkan silabus AI: ${llmErr.message}`);
+      this.logger.error(
+        `Failed to generate course syllabus: ${llmErr.message}`,
+      );
+      throw new BadRequestException(
+        `Gagal menghasilkan silabus AI: ${llmErr.message}`,
+      );
     }
   }
 }

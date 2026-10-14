@@ -68,16 +68,18 @@ export class BillingCreditsService {
     chatSessionId: string,
     promptTokens: number,
     completionTokens: number,
+    transaction?: any,
   ) {
     const totalTokens = promptTokens + completionTokens;
 
-    return this.prisma.$transaction(async (tx) => {
+    const deduct = async (tx: any) => {
       // 1. Fetch current active subscription
       const subscription = await tx.subscription.findFirst({
         where: {
           studentId,
           creatorProfileId,
           status: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: { gte: new Date() },
         },
       });
 
@@ -85,17 +87,15 @@ export class BillingCreditsService {
         throw new ForbiddenException('Active subscription not found.');
       }
 
-      // Ensure credits don't drop below zero
-      const newRemaining = Math.max(
-        0,
-        subscription.remainingCredits - totalTokens,
-      );
-
-      // 2. Decrement remaining credits
-      const updatedSub = await tx.subscription.update({
-        where: { id: subscription.id },
-        data: { remainingCredits: newRemaining },
-      });
+      // A conditional SQL decrement serializes concurrent completions without losing a charge.
+      const plan = this.prisma.db.raw.sql`
+        UPDATE subscriptions SET "remainingCredits" = "remainingCredits" - ${totalTokens}, "updatedAt" = NOW()
+        WHERE id = ${subscription.id} AND status = 'ACTIVE' AND "currentPeriodEnd" >= NOW()
+          AND "remainingCredits" >= ${totalTokens}
+        RETURNING "remainingCredits"
+      `.returnsRow({ remainingCredits: 'pg/int4@1' }).build();
+      const [updatedSub] = await tx.query(plan);
+      if (!updatedSub) throw new ForbiddenException('Insufficient credits or subscription expired.');
 
       // 3. Create CreditLedger entry
       const ledgerEntry = await tx.creditLedger.create({
@@ -113,7 +113,7 @@ export class BillingCreditsService {
       });
 
       this.logger.log(
-        `Deducted ${totalTokens} tokens for student ${studentId} (Remaining: ${newRemaining})`,
+        `Deducted ${totalTokens} tokens for student ${studentId} (Remaining: ${updatedSub.remainingCredits})`,
       );
 
       return {
@@ -121,7 +121,8 @@ export class BillingCreditsService {
         creditsDeducted: totalTokens,
         remainingCredits: updatedSub.remainingCredits,
       };
-    });
+    };
+    return transaction ? deduct(transaction) : this.prisma.$transaction(deduct);
   }
 
   /**

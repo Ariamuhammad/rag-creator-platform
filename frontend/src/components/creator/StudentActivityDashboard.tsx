@@ -86,7 +86,7 @@ export const StudentActivityDashboard: React.FC<StudentActivityDashboardProps> =
     loadAnalytics();
   }, []);
 
-  const loadAnalytics = async () => {
+  async function loadAnalytics() {
     setIsLoading(true);
     try {
       const res = await api.getStudentActivityAnalytics().catch(() => null);
@@ -98,7 +98,7 @@ export const StudentActivityDashboard: React.FC<StudentActivityDashboardProps> =
     } finally {
       setIsLoading(false);
     }
-  };
+  }
 
   const filteredStudents = (data?.students || []).filter((s) => {
     const matchesSearch =

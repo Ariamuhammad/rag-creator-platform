@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   BookOpen,
   CheckCircle2,
@@ -35,28 +35,12 @@ export const CurriculumSidebar: React.FC<CurriculumSidebarProps> = ({
   const [activeTab, setActiveTab] = useState<'CURRICULUM' | 'SOURCES'>('CURRICULUM');
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
 
-  // Auto-expand module containing active lesson or first module by default
-  useEffect(() => {
-    if (modules.length > 0) {
-      const activeParentModule = modules.find((m) =>
-        m.lessons.some((l) => l.id === activeLessonId)
-      );
-      if (activeParentModule) {
-        setExpandedModules((prev) => ({
-          ...prev,
-          [activeParentModule.id]: true,
-        }));
-      } else if (modules[0]?.id) {
-        setExpandedModules((prev) => ({
-          ...prev,
-          [modules[0].id]: true,
-        }));
-      }
-    }
-  }, [activeLessonId, modules]);
+  const defaultExpandedId = modules.find((module) =>
+    module.lessons.some((lesson) => lesson.id === activeLessonId)
+  )?.id || modules[0]?.id;
 
   const toggleModule = (id: string) => {
-    setExpandedModules((prev) => ({ ...prev, [id]: !prev[id] }));
+    setExpandedModules((prev) => ({ ...prev, [id]: !(prev[id] ?? id === defaultExpandedId) }));
   };
 
   const progressPercentage =
@@ -129,7 +113,7 @@ export const CurriculumSidebar: React.FC<CurriculumSidebarProps> = ({
         {activeTab === 'CURRICULUM' ? (
           <div className="py-2">
             {modules.map((mod) => {
-              const isExpanded = expandedModules[mod.id] ?? false;
+              const isExpanded = expandedModules[mod.id] ?? mod.id === defaultExpandedId;
               const moduleCompleted = mod.lessons.every((l) => l.completed);
 
               return (

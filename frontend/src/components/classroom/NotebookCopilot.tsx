@@ -15,7 +15,13 @@ import {
   Plus,
   Compass,
 } from 'lucide-react';
+import { api } from '../../services/api';
+import { BrowserAiStatus } from '../BrowserAiStatus';
 import type { CopilotMessage, PersonalNote } from '../../types/classroom';
+
+function newMessage(sender: CopilotMessage['sender'], content: string): CopilotMessage {
+  return { id: crypto.randomUUID(), sender, content, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+}
 
 interface NotebookCopilotProps {
   creatorProfileId: string;
@@ -25,6 +31,7 @@ interface NotebookCopilotProps {
   onAddNote: (note: { noteText: string; selectedText?: string }) => void;
   onDeleteNote: (id: string) => void;
   remainingCredits: number;
+  onCreditsChange: (remaining: number) => void;
   initialContextQuery?: string;
   onClearInitialContextQuery?: () => void;
 }
@@ -37,6 +44,7 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
   onAddNote,
   onDeleteNote,
   remainingCredits,
+  onCreditsChange,
   initialContextQuery,
   onClearInitialContextQuery,
 }) => {
@@ -62,83 +70,58 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
   ]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => requestRef.current?.abort(), []);
 
-  // If initialContextQuery passed from text highlight in Canvas, populate input
-  useEffect(() => {
+  const [lastContextQuery, setLastContextQuery] = useState<string | undefined>();
+  if (initialContextQuery !== lastContextQuery) {
+    setLastContextQuery(initialContextQuery);
     if (initialContextQuery) {
       setAttachedContext(initialContextQuery);
       setInputQuery(`Jelaskan lebih detail bagian materi ini: "${initialContextQuery.slice(0, 80)}..."`);
       setActiveTab('COPILOT');
-      onClearInitialContextQuery?.();
     }
-  }, [initialContextQuery, onClearInitialContextQuery]);
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  const handleSendMessage = async (textToSend?: string) => {
+  async function handleSendMessage(textToSend?: string) {
     const text = textToSend || inputQuery;
-    if (!text.trim() || isLoading) return;
+    if (!text.trim() || isLoading || requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
 
     let fullPrompt = text;
     if (attachedContext) {
       fullPrompt = `Konteks yang saya kutip dari materi:\n"${attachedContext}"\n\nPertanyaan: ${text}`;
     }
 
-    const userMessage: CopilotMessage = {
-      id: `usr_${Date.now()}`,
-      sender: 'user',
-      content: text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
+    const userMessage = newMessage('user', text);
 
     setMessages((prev) => [...prev, userMessage]);
     setInputQuery('');
     setAttachedContext(null);
     setIsLoading(true);
+    onClearInitialContextQuery?.();
 
     try {
-      // Connect to real NestJS RAG API
-      const res = await fetch('/api/v1/chat/query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('rag_token')}`,
-        },
-        body: JSON.stringify({
-          creatorProfileId,
-          message: fullPrompt,
-          courseId,
-        }),
-      });
+      const data = await api.queryChat(creatorProfileId, fullPrompt, undefined, courseId, controller.signal);
+      onCreditsChange(data.credits.remainingCredits);
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Gagal menghubungi AI Mentor');
-      }
-
-      const assistantMessage: CopilotMessage = {
-        id: `asst_${Date.now()}`,
-        sender: 'assistant',
-        content: data.answer || 'Tidak ada respons.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        tokens: data.tokens,
-      };
+      const assistantMessage: CopilotMessage = { ...newMessage('assistant', data.answer || 'Tidak ada respons.'), tokens: { prompt: data.usage?.promptTokens || 0, completion: data.usage?.completionTokens || 0, total: data.usage?.totalTokens || 0 }, sources: data.sources, mode: data.mode };
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err: any) {
-      const errMsg: CopilotMessage = {
-        id: `asst_err_${Date.now()}`,
-        sender: 'assistant',
-        content: `⚠️ Gagal memproses pertanyaan RAG: ${err.message || 'Koneksi ke backend bermasalah'}. Pastikan layanan AI dan database aktif.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
+      if (err.name === 'AbortError') { setInputQuery(text); return; }
+      const errMsg = newMessage('assistant', `⚠️ Gagal memproses pertanyaan RAG: ${err.message || 'Koneksi ke backend bermasalah'}.`);
       setMessages((prev) => [...prev, errMsg]);
     } finally {
+      if (requestRef.current === controller) requestRef.current = null;
       setIsLoading(false);
     }
-  };
+  }
 
   const handleAddNewNote = (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,6 +221,17 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
                   </div>
 
                   {/* Token Consumption */}
+                  {!!msg.sources?.length && (
+                    <div className="space-y-1 text-[11px] text-zinc-400">
+                      <p>{msg.mode === 'sources' ? 'Kutipan langsung dari materi' : 'Jawaban AI: cocokkan dengan sumber materi'}</p>
+                      {msg.sources.map((source, index) => (
+                        <details key={`${source.documentId}-${index}`} className="rounded-lg border border-zinc-800 p-2">
+                          <summary className="cursor-pointer text-indigo-300">[{index + 1}] {source.documentTitle || 'Materi kursus'}{source.chunkIndex !== undefined ? ` · Bagian ${source.chunkIndex + 1}` : ''}</summary>
+                          <blockquote className="mt-2 whitespace-pre-wrap max-h-48 overflow-auto text-zinc-300">{source.content}</blockquote>
+                        </details>
+                      ))}
+                    </div>
+                  )}
                   {msg.tokens && (
                     <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-mono">
                       <Zap className="w-3 h-3 text-emerald-400" />
@@ -260,6 +254,7 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
                   <Sparkles className="w-3.5 h-3.5" />
                 </div>
                 <span>Mencari di pgvector &amp; merumuskan jawaban...</span>
+                <button type="button" onClick={() => requestRef.current?.abort()} className="underline text-zinc-300">Batalkan</button>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -292,7 +287,7 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setAttachedContext(null)}
+                onClick={() => { setAttachedContext(null); onClearInitialContextQuery?.(); }}
                 className="text-zinc-400 hover:text-white p-0.5"
               >
                 <X className="w-3 h-3" />
@@ -300,6 +295,7 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
             </div>
           )}
 
+          <div className="px-3 py-2"><BrowserAiStatus /></div>
           {/* Bottom Chat Input Form */}
           <div className="p-3 border-t border-zinc-800/80 bg-zinc-950 space-y-1.5">
             <div className="relative flex items-end rounded-xl bg-zinc-900 border border-zinc-800 focus-within:border-indigo-500 transition">
@@ -339,7 +335,7 @@ export const NotebookCopilot: React.FC<NotebookCopilotProps> = ({
 
             <div className="flex justify-between items-center text-[10px] text-zinc-500 px-1 font-mono">
               <span>Sisa: {remainingCredits.toLocaleString()} Token</span>
-              <span>Model: Llama 3 / GPT-4o</span>
+              <span>AI perangkat</span>
             </div>
           </div>
         </div>

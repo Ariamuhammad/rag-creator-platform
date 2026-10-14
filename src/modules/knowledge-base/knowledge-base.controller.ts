@@ -34,6 +34,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../../common/types/enums';
+import { BrowserEmbeddingsDto } from './dto/browser-embeddings.dto';
 
 @ApiTags('Knowledge Base')
 @Controller('knowledge-base')
@@ -44,7 +45,7 @@ export class KnowledgeBaseController {
 
   @Post('upload')
   @Roles(UserRole.CREATOR, UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload PDF/CSV document for asynchronous ingestion' })
   @ApiBody({
@@ -113,6 +114,18 @@ export class KnowledgeBaseController {
     @CurrentUser('creatorProfileId') creatorProfileId: string,
   ) {
     return this.kbService.getDocumentStatus(documentId, creatorProfileId);
+  }
+
+  @Get('documents/:id/browser-chunks')
+  @Roles(UserRole.CREATOR, UserRole.ADMIN)
+  browserChunks(@Param('id') id: string, @CurrentUser('creatorProfileId') creatorProfileId: string) {
+    return this.kbService.getBrowserChunks(id, creatorProfileId);
+  }
+
+  @Post('documents/:id/browser-embeddings')
+  @Roles(UserRole.CREATOR, UserRole.ADMIN)
+  browserEmbeddings(@Param('id') id: string, @CurrentUser('creatorProfileId') creatorProfileId: string, @Body() dto: BrowserEmbeddingsDto) {
+    return this.kbService.saveBrowserEmbeddings(id, creatorProfileId, dto);
   }
 
   @Delete('documents/:id')

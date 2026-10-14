@@ -3,12 +3,15 @@ import {
   NotFoundException,
   ForbiddenException,
   Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { DocumentStatus } from '../../common/types/enums';
+import { BROWSER_EMBEDDING_SPACE, BROWSER_EMBEDDING_DIMENSIONS } from '../../common/browser-ai';
+import { BrowserEmbeddingsDto } from './dto/browser-embeddings.dto';
 
 export interface IngestionJobPayload {
   documentId: string;
@@ -45,6 +48,21 @@ export class KnowledgeBaseService {
       throw new ForbiddenException(
         'User is not associated with any CreatorProfile.',
       );
+    }
+
+    if (dto.knowledgeBaseId) {
+      const kb = await this.prisma.knowledgeBase.findUnique({
+        where: { id: dto.knowledgeBaseId },
+      });
+      if (!kb || kb.creatorProfileId !== creatorProfileId)
+        throw new ForbiddenException('Knowledge base access denied.');
+    }
+    if (dto.courseId) {
+      const course = await this.prisma.course.findUnique({
+        where: { id: dto.courseId },
+      });
+      if (!course || course.creatorProfileId !== creatorProfileId)
+        throw new ForbiddenException('Course access denied.');
     }
 
     // Determine or create default KnowledgeBase for this creator
@@ -234,5 +252,88 @@ export class KnowledgeBaseService {
     });
 
     return { message: 'Document and its vector chunks deleted successfully.' };
+  }
+
+  async getBrowserChunks(documentId: string, creatorProfileId: string) {
+    const document = await this.getDocumentStatus(documentId, creatorProfileId);
+    if (document.status === DocumentStatus.FAILED)
+      throw new BadRequestException(
+        document.errorMessage || 'Ekstraksi dokumen gagal.',
+      );
+    const chunks = await this.prisma.$queryRawUnsafe<{
+      id: string;
+      content: string;
+    }>(
+      `SELECT id, content FROM document_chunks WHERE "documentId" = $1 AND "creatorProfileId" = $2
+       AND COALESCE(metadata->>'embeddingSpace', '') <> $3 ORDER BY "chunkIndex" LIMIT 8`,
+      documentId,
+      creatorProfileId,
+      BROWSER_EMBEDDING_SPACE,
+    );
+    return { chunks, status: document.status };
+  }
+
+  async saveBrowserEmbeddings(
+    documentId: string,
+    creatorProfileId: string,
+    dto: BrowserEmbeddingsDto,
+  ) {
+    const document = await this.getDocumentStatus(documentId, creatorProfileId);
+    if (
+      document.status === DocumentStatus.PROCESSING ||
+      document.status === DocumentStatus.FAILED
+    ) {
+      throw new BadRequestException(
+        'Dokumen belum siap untuk embedding browser.',
+      );
+    }
+    const ids = new Set(dto.chunks.map((chunk) => chunk.id));
+    if (ids.size !== dto.chunks.length)
+      throw new BadRequestException('Chunk ID duplikat.');
+    const owned = await this.prisma.$queryRawUnsafe<{ id: string }>(
+      'SELECT id FROM document_chunks WHERE "documentId" = $1 AND "creatorProfileId" = $2',
+      documentId,
+      creatorProfileId,
+    );
+    const ownedIds = new Set(owned.map((chunk) => chunk.id));
+    for (const chunk of dto.chunks) {
+      if (!ownedIds.has(chunk.id))
+        throw new ForbiddenException('Chunk access denied.');
+      if (
+        chunk.embedding.length !== BROWSER_EMBEDDING_DIMENSIONS ||
+        !chunk.embedding.every(
+          (value) => Number.isFinite(value) && Math.abs(value) <= 1,
+        ) ||
+        !chunk.embedding.some((value) => value !== 0)
+      ) {
+        throw new BadRequestException('Embedding tidak valid.');
+      }
+    }
+    for (const chunk of dto.chunks) {
+      const vector = chunk.embedding.concat(
+        new Array(1536 - chunk.embedding.length).fill(0),
+      );
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE document_chunks SET embedding = $1::vector,
+         metadata = COALESCE(metadata::jsonb, '{}'::jsonb) || jsonb_build_object('embeddingSpace', $2::text)
+         WHERE id = $3 AND "documentId" = $4 AND "creatorProfileId" = $5`,
+        `[${vector.join(',')}]`,
+        BROWSER_EMBEDDING_SPACE,
+        chunk.id,
+        documentId,
+        creatorProfileId,
+      );
+    }
+    const { chunks: remaining } = await this.getBrowserChunks(
+      documentId,
+      creatorProfileId,
+    );
+    if (remaining.length === 0) {
+      await this.prisma.document.update({
+        where: { id: documentId },
+        data: { status: DocumentStatus.COMPLETED, errorMessage: null },
+      });
+    }
+    return { completed: remaining.length === 0 };
   }
 }
